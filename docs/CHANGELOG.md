@@ -33,9 +33,31 @@
   - Backend auto-detection (Btrfs, LVM, ZFS) at startup
   - Privilege escalation check utility
 
+### Added (Stage 5 — Backup Engine Integration)
+
+- **FileBackupAdapter** (`adapters/file.rs`):
+  - `run_backup()`: converts SLA params to `BackupJobConfig`, invokes `FileBackupJob::new(cfg).run()`, returns structured `BackupResult`
+  - `run_restore()`: converts params to `RestoreJobConfig`, invokes `FileRestoreJob::new(cfg).run()`
+  - Maps SLA copy_mode to bifrost format_tag (common→COMMON, aggregate→AGGR)
+  - Maps SLA backup_type to bifrost type_tag (full→FULL, full_incremental→INC)
+  - Configures hardlink, delete, mtime, aggregate mode, retry policy, failure logging
+- **JobQueue** (`runner/queue.rs`):
+  - `submit()`: inserts job row, spawns tokio task with semaphore permit, manages cancellation tokens
+  - `cancel()`: signals cancellation token for running jobs
+  - `Arc<Mutex<HashMap>>` for active job tracking with cleanup on completion/cancel
+  - Proper concurrency limiting via `Arc<Semaphore>`
+- **Job Execution** (`runner/execute.rs`):
+  - `execute_job()`: dispatches backup/restore/snapshot operations by asset kind
+  - Loads asset config, SLA policy, parses AssetConfig enum
+  - `execute_backup()`: matches AssetConfig variant (Fileset/Volume/NasShare), spawns blocking task
+  - Records `BackupCopy` row in DB after successful backup with copy metadata
+  - Proper error propagation and status updates for all failure paths
+- **Runner module** (`runner/mod.rs`): re-exports JobQueue from queue submodule
+
 ### Engineering
 
 - All API types defined with serde Serialize/Deserialize
 - Full DB CRUD modules: assets, slas, jobs, copies, creds
 - Migration test validates schema creation
 - Auth token lifecycle test validates generation and loading
+- Zero-warning release build, all 4 tests passing

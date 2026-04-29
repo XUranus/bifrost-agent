@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, Query, State},
-    routing::{delete, get, post},
+    routing::{get, post},
     Json, Router,
 };
 use serde::Deserialize;
@@ -12,7 +12,7 @@ use crate::server::router::AppState;
 #[derive(Deserialize)]
 struct ListQuery {
     asset_id: Option<String>,
-    status: Option<String>,
+    _status: Option<String>,
 }
 
 /// GET /api/v1/backup-copies

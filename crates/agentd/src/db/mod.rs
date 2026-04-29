@@ -1,5 +1,4 @@
 use rusqlite::Connection;
-use std::path::Path;
 use std::sync::Mutex;
 
 use crate::config::AgentConfig;

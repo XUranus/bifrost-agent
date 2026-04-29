@@ -1,6 +1,6 @@
 use axum::{
     extract::State,
-    routing::{get, put},
+    routing::get,
     Json, Router,
 };
 
