@@ -54,6 +54,31 @@
   - Proper error propagation and status updates for all failure paths
 - **Runner module** (`runner/mod.rs`): re-exports JobQueue from queue submodule
 
+### Added (Stage 6 — Volume, Consistency, and NAS Adapters)
+
+- **VolumeBackupAdapter** (`adapters/volume.rs`):
+  - `run_backup()`: resolves vpt-rs backend by name, creates BackupPlan with temporary snapshot policy, calls `backend.backup_volume()`
+  - `run_restore()`: creates RestorePlan, calls `backend.restore_volume()` with force flag
+  - `create_snapshot()` / `delete_snapshot()`: snapshot lifecycle management via SnapshotProvider trait
+  - Backend auto-resolution via `CurrentBackend::named()` (btrfs/lvm/zfs)
+- **ConsistencyAdapter** (`adapters/consistency.rs`):
+  - Full consistency backup workflow: volume snapshot → mount → bifrost file scan → unmount → delete snapshot
+  - Uses vpt-rs `open_copy_mount` / `close_copy_mount` for composable snapshot+mount lifecycle
+  - Groups source paths by volume to minimize snapshot count
+  - Volume detection via `/proc/mounts` and `df` for path-to-volume mapping
+  - Mount point resolution for path relocation inside snapshots
+  - Cleanup guarantee: unmounts and deletes snapshots even on backup failure
+- **NAS Share Backup** (in `execute.rs`):
+  - Parses `nfs://` and `smb://` URLs via `DataLocation::from_nfs_url` / `from_smb_url`
+  - Direct FileBackupJob execution with remote source DataLocation
+  - Supports all bifrost transport combinations (NFS→local, SMB→local)
+- **Full asset kind dispatch** (`execute.rs`):
+  - Fileset: FileBackupAdapter (standard) or ConsistencyAdapter (consistency mode)
+  - Volume: VolumeBackupAdapter with backend auto-detection
+  - NasShare: FileBackupJob with remote DataLocation
+  - Unified `record_backup_copy()` for all backup paths
+  - Separate target directories for file copies vs volume images
+
 ### Engineering
 
 - All API types defined with serde Serialize/Deserialize
