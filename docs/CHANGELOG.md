@@ -105,6 +105,29 @@
   - Proper error propagation with failed/completed status updates
 - **Module wiring**: scheduler, retention, and restore fully integrated with DB and progress bus
 
+### Added (Stage 8 — Desktop Tauri Client with React Frontend)
+
+- **Tauri 2.x Rust backend** (`desktop/src-tauri/`):
+  - `AppState`: manages agent URL, token, and persistent settings
+  - 23 Tauri command handlers proxying to AgentClient for all agent API endpoints
+  - `AgentClient` HTTP module: Bearer-auth REST client via reqwest
+  - `AgentClient` WebSocket module: progress event streaming via tokio-tungstenite
+  - `settings.rs`: JSON file persistence at `~/.config/bifrost-desktop/settings.json`
+  - `tray.rs`: System tray with Show/Quit menu items
+  - Tauri plugins: shell, notification, dialog
+- **React 18 + TypeScript frontend** (`desktop/src/`):
+  - Vite 5 build with `@vitejs/plugin-react`
+  - `ConnectPage`: agent URL + token input with validation
+  - `Dashboard`: health stats, asset summary, recent jobs table
+  - `AssetsPage`: asset grid with kind badges, backup-now action, empty state
+  - `AssetDetail`: full asset metadata, SLA policy display, backup copies table, delete action
+  - `JobsPage`: filterable job list with status badges, cancel action for running jobs
+  - `SettingsPage`: agent health and info panels
+  - `Layout`: sidebar navigation with active route highlighting and disconnect button
+  - `api/client.ts`: typed Tauri invoke bridge for all 23 agent endpoints
+  - `types/index.ts`: full TypeScript type definitions mirroring agent API types
+- **Build verification**: TypeScript type-check clean, Vite production build passes (44 modules)
+
 ### Engineering
 
 - All API types defined with serde Serialize/Deserialize
