@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Bifrost Desktop
+Comment=Cross-platform backup application
+Exec=bifrost-desktop
+Icon=bifrost-desktop
+Categories=System;Utility;Archiving;
+Terminal=false
+StartupNotify=true

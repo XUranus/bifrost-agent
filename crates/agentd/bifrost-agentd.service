@@ -1,0 +1,30 @@
+[Unit]
+Description=Bifrost Backup Agent Daemon
+Documentation=https://github.com/bifrost/bifrost-desktop
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bifrost
+Group=bifrost
+ExecStart=/usr/bin/bifrost-agentd \
+    --data-dir /var/lib/bifrost-agent \
+    --bind-host 127.0.0.1 \
+    --bind-port 8700 \
+    --max-concurrent-jobs 4 \
+    --log-level info
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+LimitNPROC=4096
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/bifrost-agent
+ReadOnlyPaths=/etc/bifrost
+AmbientCapabilities=CAP_DAC_READ_SEARCH CAP_SYS_ADMIN
+
+[Install]
+WantedBy=multi-user.target

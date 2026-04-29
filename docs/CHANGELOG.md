@@ -128,7 +128,25 @@
   - `types/index.ts`: full TypeScript type definitions mirroring agent API types
 - **Build verification**: TypeScript type-check clean, Vite production build passes (44 modules)
 
+### Added (Stage 9 — Polish, Packaging, and Documentation)
+
+- **systemd service** (`crates/agentd/bifrost-agentd.service`):
+  - Type=simple, runs as `bifrost` user, sandboxed with ProtectSystem=strict
+  - Ambient capabilities: CAP_DAC_READ_SEARCH (file access), CAP_SYS_ADMIN (volume snapshots)
+  - Configurable data dir, bind host/port, concurrency, and log level
+- **Desktop entry** (`desktop/bifrost-desktop.desktop`):
+  - Freedesktop .desktop file for application menu integration
+- **README.md**: Complete project overview with quick start, API reference table, CLI flags, SLA policy docs, and project structure diagram
+- **ARCHITECTURE.md**: Comprehensive rewrite covering data flow diagrams (backup/restore/schedule/retention), all module descriptions, API reference, database schema, key design decisions, and development guide with example curl commands
+- **`.gitignore`**: target/, node_modules/, dist/
+
 ### Engineering
+
+- All API types defined with serde Serialize/Deserialize
+- Full DB CRUD modules: assets, slas, jobs, copies, creds, retention_log
+- Zero-warning release build, all 4 tests passing
+- TypeScript strict-mode type-check passes clean
+- Vite production bundle builds (44 modules, 189 KB gzipped ~59 KB)
 
 - All API types defined with serde Serialize/Deserialize
 - Full DB CRUD modules: assets, slas, jobs, copies, creds
