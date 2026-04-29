@@ -1,0 +1,7 @@
+/target/
+**/*.rs.bk
+*.pdb
+.DS_Store
+node_modules/
+dist/
+desktop/src-tauri/target/
