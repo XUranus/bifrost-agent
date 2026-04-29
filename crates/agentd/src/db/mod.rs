@@ -10,6 +10,7 @@ pub mod slas;
 pub mod jobs;
 pub mod copies;
 pub mod creds;
+pub mod retention_log;
 
 /// Central database handle, shared across all API handlers via axum State.
 pub struct Database {

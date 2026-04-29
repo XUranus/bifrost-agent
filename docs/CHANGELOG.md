@@ -79,6 +79,32 @@
   - Unified `record_backup_copy()` for all backup paths
   - Separate target directories for file copies vs volume images
 
+### Added (Stage 7 — Scheduler, Retention, and Restore)
+
+- **CronScheduler** (`scheduler/cron.rs`):
+  - Background tick loop (60s interval) with cancellation token support
+  - Evaluates `schedule_cron` from SLA policies against all enabled assets
+  - Uses `cron::Schedule` with `chrono::DateTime<Utc>` for next-fire computation
+  - Tracks per-asset last-run timestamps to avoid duplicate submissions
+  - Submits backup jobs to JobQueue when schedule fires
+  - Graceful shutdown via `tokio::select!` on cancel signal
+- **RetentionEngine** (`retention.rs`):
+  - `evaluate_all()`: iterates all assets, evaluates SLA retention policies
+  - Three retention strategies: `count` (keep N newest), `days` (keep younger than N days), `size_gb` (keep up to N GB total)
+  - Expires copies by updating status and deleting data directories
+  - Logs retention actions to `retention_log` table with reason tracking
+  - `RetentionSummary` with expired count and error tracking
+- **DB retention_log** (`db/retention_log.rs`):
+  - `insert()`: records retention actions with asset_id, copy_id, reason, pruned_at
+  - `list_by_asset()`: queries all retention log entries for an asset
+- **Restore execution** (`api/restore.rs`):
+  - Full restore job lifecycle: creates job row, spawns async execution, updates status
+  - Dispatches to FileBackupAdapter for fileset assets (restore from manifest copy)
+  - Dispatches to VolumeBackupAdapter for volume assets (restore from image file)
+  - Auto-discovers volume image files in copy data directories
+  - Proper error propagation with failed/completed status updates
+- **Module wiring**: scheduler, retention, and restore fully integrated with DB and progress bus
+
 ### Engineering
 
 - All API types defined with serde Serialize/Deserialize
