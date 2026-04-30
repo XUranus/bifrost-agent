@@ -3,11 +3,13 @@ import { useState } from "react";
 interface Props {
   onConnect: (url: string, token: string) => void;
   error: string | null;
+  initialUrl?: string;
+  initialToken?: string;
 }
 
-export default function ConnectPage({ onConnect, error }: Props) {
-  const [url, setUrl] = useState("http://127.0.0.1:8700");
-  const [token, setToken] = useState("");
+export default function ConnectPage({ onConnect, error, initialUrl, initialToken }: Props) {
+  const [url, setUrl] = useState(initialUrl || "http://127.0.0.1:8787");
+  const [token, setToken] = useState(initialToken || "");
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -27,7 +29,7 @@ export default function ConnectPage({ onConnect, error }: Props) {
               type="text"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="http://127.0.0.1:8700"
+              placeholder="http://127.0.0.1:8787"
             />
           </label>
           <label style={styles.label}>
@@ -40,6 +42,9 @@ export default function ConnectPage({ onConnect, error }: Props) {
               placeholder="64-character hex token"
             />
           </label>
+          <p style={styles.hint}>
+            Find the token in your agent&apos;s data directory (e.g. <code>/var/lib/bifrost-agent/agent.key</code>)
+          </p>
           {error && <p style={styles.error}>{error}</p>}
           <button style={styles.button} type="submit">
             Connect
@@ -76,6 +81,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 14,
     outline: "none",
   },
+  hint: { fontSize: 12, color: "#888", margin: 0, lineHeight: 1.5 },
   error: { color: "#e53e3e", fontSize: 13, padding: "8px 12px", backgroundColor: "#fff5f5", borderRadius: 6 },
   button: {
     padding: "12px 0",

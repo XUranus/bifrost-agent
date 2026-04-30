@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import { connectAgent, disconnectAgent } from "./api/client";
+import { connectAgent, disconnectAgent, getSettings } from "./api/client";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import AssetsPage from "./pages/Assets";
@@ -13,6 +13,17 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [agentUrl, setAgentUrl] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [initialUrl, setInitialUrl] = useState<string | undefined>();
+  const [initialToken, setInitialToken] = useState<string | undefined>();
+
+  useEffect(() => {
+    getSettings()
+      .then((s) => {
+        if (s.agent_url) setInitialUrl(s.agent_url);
+        if (s.agent_token) setInitialToken(s.agent_token);
+      })
+      .catch(() => {});
+  }, []);
 
   async function handleConnect(url: string, token: string) {
     setError(null);
@@ -36,7 +47,14 @@ export default function App() {
   }
 
   if (!connected) {
-    return <ConnectPage onConnect={handleConnect} error={error} />;
+    return (
+      <ConnectPage
+        onConnect={handleConnect}
+        error={error}
+        initialUrl={initialUrl}
+        initialToken={initialToken}
+      />
+    );
   }
 
   return (

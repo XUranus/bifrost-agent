@@ -1,18 +1,18 @@
 use tauri::{
-    AppHandle,
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
+    AppHandle, Manager,
 };
 
-pub fn create_tray(app: &AppHandle) -> Result<tauri::tray::TrayIcon, tauri::Error> {
+pub fn create_tray(app: &AppHandle) -> Result<(), tauri::Error> {
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let show = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit])?;
 
-    let tray = TrayIconBuilder::new()
+    let _tray = TrayIconBuilder::new()
         .menu(&menu)
         .tooltip("Bifrost Desktop")
-        .on_menu_event(|app, event| match event.id.as_ref() {
+        .on_menu_event(|app: &tauri::AppHandle, event| match event.id.as_ref() {
             "quit" => {
                 app.exit(0);
             }
@@ -26,5 +26,5 @@ pub fn create_tray(app: &AppHandle) -> Result<tauri::tray::TrayIcon, tauri::Erro
         })
         .build(app)?;
 
-    Ok(tray)
+    Ok(())
 }

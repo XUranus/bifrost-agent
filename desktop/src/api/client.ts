@@ -20,6 +20,16 @@ export async function disconnectAgent(): Promise<void> {
   return invoke("disconnect_agent");
 }
 
+export async function getSettings(): Promise<{
+  agent_url: string | null;
+  agent_token: string | null;
+  theme: string;
+  window_width: number | null;
+  window_height: number | null;
+}> {
+  return invoke("get_settings");
+}
+
 export async function getAgentInfo(): Promise<AgentInfoResponse> {
   return invoke("get_agent_info");
 }

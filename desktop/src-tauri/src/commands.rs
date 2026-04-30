@@ -1,6 +1,7 @@
 use tauri::State;
 use crate::agent_client::AgentClient;
 use crate::agent_client::types::*;
+use crate::settings::Settings;
 use crate::AppState;
 
 fn get_client(state: &AppState) -> Result<AgentClient, String> {
@@ -21,7 +22,9 @@ pub async fn connect_agent(
 ) -> Result<(), String> {
     // Validate the connection by calling health
     let client = AgentClient::new(url.clone(), token.clone()).map_err(|e| e.to_string())?;
-    client.get::<HealthResponse>("/api/v1/health").await.map_err(|e| e.to_string())?;
+    client.get::<HealthResponse>("/api/v1/health")
+        .await
+        .map_err(|e| format!("Failed to reach agent at {url}: {e}"))?;
 
     // Store the connection details
     *state.agent_url.lock().unwrap() = Some(url);
@@ -238,6 +241,13 @@ pub async fn start_restore(
 ) -> Result<JobResponse, String> {
     let client = get_client(&state)?;
     client.post("/api/v1/restore", &body).await.map_err(|e| e.to_string())
+}
+
+// --- Settings ---
+
+#[tauri::command]
+pub async fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
+    Ok(state.settings.lock().unwrap().clone())
 }
 
 // --- Browse ---

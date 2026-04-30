@@ -40,11 +40,7 @@
     "shell": {
       "open": true
     },
-    "notification": {
-      "all": true
-    },
-    "dialog": {
-      "all": true
-    }
+    "notification": null,
+    "dialog": null
   }
 }

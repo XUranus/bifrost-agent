@@ -34,12 +34,7 @@ pub fn build_router(
         queue,
     };
 
-    // Public routes (no auth)
-    let public = Router::new()
-        .route("/api/v1/health", get(api::agent::health))
-        .with_state(state.clone());
-
-    // Authenticated API routes
+    // Authenticated API routes (auth layer applied here, not at top level)
     let api_routes = Router::new()
         .nest("/assets", api::assets::router())
         .nest("/sla-policies", api::slas::router())
@@ -48,19 +43,25 @@ pub fn build_router(
         .nest("/browse", api::browse::router())
         .nest("/restore", api::restore::router())
         .nest("/agent", api::agent::router())
+        .layer(ValidateRequestHeaderLayer::bearer(&token))
         .with_state(state.clone());
 
-    // WebSocket route
+    // WebSocket route (auth applied too)
     let ws_route = Router::new()
         .route("/ws/events", get(ws::ws_upgrade))
+        .layer(ValidateRequestHeaderLayer::bearer(&token))
         .with_state(state.clone());
 
-    // Combine everything with auth + CORS + tracing
+    // Public health route (no auth)
+    let health_route = Router::new()
+        .route("/api/v1/health", get(api::agent::health))
+        .with_state(state.clone());
+
+    // Combine: public health + auth-protected API + WS
     Router::new()
-        .merge(public)
-        .merge(ws_route)
+        .merge(health_route)
         .nest("/api/v1", api_routes)
-        .layer(ValidateRequestHeaderLayer::bearer(&token))
+        .merge(ws_route)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
 }
