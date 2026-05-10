@@ -159,9 +159,42 @@ async fn execute_restore_job(
             })
             .await??;
         }
-        crate::api::types::AssetConfig::NasShare { .. } => {
-            progress.job_log(job_id, "warn", "NAS share restore not yet implemented");
-            return Err(anyhow::anyhow!("NAS share restore not yet implemented"));
+        crate::api::types::AssetConfig::NasShare { url, .. } => {
+            progress.job_log(job_id, "info", &format!(
+                "NAS share restore: {} -> {}",
+                source_dir.display(),
+                url
+            ));
+
+            // Parse the NAS URL to determine the target location
+            let target = if url.starts_with("nfs://") {
+                bifrost::frame::location::DataLocation::from_nfs_url(&url)
+                    .map_err(|e| anyhow::anyhow!("Invalid NFS URL '{url}': {e}"))?
+            } else if url.starts_with("smb://") {
+                bifrost::frame::location::DataLocation::from_smb_url(&url)
+                    .map_err(|e| anyhow::anyhow!("Invalid SMB URL '{url}': {e}"))?
+            } else {
+                return Err(anyhow::anyhow!("Unsupported NAS URL scheme: {url}"));
+            };
+
+            let adapter = crate::adapters::file::FileBackupAdapter::new(
+                db.clone(),
+                progress.clone(),
+            );
+            let source_clone = source_dir.clone();
+            let job_id_owned = job_id.to_string();
+
+            // Use the NAS location as the restore target
+            // bifrost will handle mounting/unmounting the share
+            tokio::task::spawn_blocking(move || {
+                adapter.run_restore_with_location(
+                    &job_id_owned,
+                    &source_clone,
+                    target,
+                    bifrost::backup::RestorePolicy::Replace,
+                )
+            })
+            .await??;
         }
     }
 

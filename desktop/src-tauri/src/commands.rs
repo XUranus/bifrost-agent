@@ -211,6 +211,15 @@ pub async fn cancel_job(
         .await.map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn get_job_logs(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<serde_json::Value, String> {
+    let client = get_client(&state)?;
+    client.get(&format!("/api/v1/jobs/{id}/log")).await.map_err(|e| e.to_string())
+}
+
 // --- Backup Copies ---
 
 #[tauri::command]

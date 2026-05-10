@@ -14,10 +14,10 @@ npm run build
 echo "Frontend built OK"
 echo
 
-# 2. Agent daemon
+# 2. Agent daemon (requires nightly for MSRV compatibility)
 echo "--- Step 2/3: Build bifrost-agentd ---"
 cd "$ROOT"
-cargo build -p bifrost-agentd "$@"
+rustup run nightly cargo build -p bifrost-agentd "$@"
 echo "bifrost-agentd built OK"
 echo
 
@@ -25,9 +25,9 @@ echo
 echo "--- Step 3/3: Build bifrost-desktop ---"
 cd "$ROOT/desktop/src-tauri"
 if [ "${1:-}" = "--release" ]; then
-    cargo tauri build --no-bundle
+    rustup run nightly cargo tauri build --no-bundle
 else
-    cargo tauri build --debug --no-bundle
+    rustup run nightly cargo tauri build --debug --no-bundle
 fi
 echo "bifrost-desktop built OK"
 echo

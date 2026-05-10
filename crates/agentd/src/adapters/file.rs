@@ -162,6 +162,42 @@ impl FileBackupAdapter {
         PathBuf::from("/var/lib/bifrost-agent/copy_repos")
     }
 
+    /// Run a file restore job to a remote destination (NAS, SMB, NFS).
+    ///
+    /// This is a blocking operation — call from `tokio::task::spawn_blocking`.
+    pub fn run_restore_with_location(
+        &self,
+        job_id: &str,
+        source_dir: &Path,
+        target: DataLocation,
+        policy: bifrost::backup::RestorePolicy,
+    ) -> Result<(), anyhow::Error> {
+        use bifrost::frame::FileRestoreJob;
+        use bifrost::frame::RestoreJobConfig;
+
+        self.progress.job_status(job_id, "running", None);
+        self.progress.job_log(job_id, "info", "Starting file restore to remote target...");
+
+        let cfg = RestoreJobConfig {
+            copy_source: DataLocation::local(source_dir.to_path_buf()),
+            restore_target: target,
+            policy,
+            ..Default::default()
+        };
+
+        let restore_job = FileRestoreJob::new(cfg);
+        let result = restore_job.run().map_err(|e| {
+            anyhow::anyhow!("Restore job failed: {e}")
+        })?;
+
+        self.progress.job_log(job_id, "info", &format!(
+            "Restore complete: {} files, {} bytes",
+            result.total_files, result.total_bytes
+        ));
+
+        Ok(())
+    }
+
     fn failure_log_path(&self, job_id: &str) -> PathBuf {
         PathBuf::from("/var/lib/bifrost-agent/logs/jobs")
             .join(format!("{job_id}_failures.json"))

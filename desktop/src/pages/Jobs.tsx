@@ -1,11 +1,15 @@
 import { useState, useEffect } from "react";
 import { listJobs, cancelJob } from "../api/client";
+import { useToast } from "../components/Toast";
+import LogViewer from "../components/LogViewer";
 import type { JobResponse } from "../types";
 
 export default function JobsPage() {
   const [jobs, setJobs] = useState<JobResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("");
+  const [logJobId, setLogJobId] = useState<string | null>(null);
+  const { pushToast } = useToast();
 
   async function load() {
     try {
@@ -19,14 +23,33 @@ export default function JobsPage() {
     }
   }
 
-  useEffect(() => { load(); }, [statusFilter]);
+  useEffect(() => {
+    load();
+    // Auto-refresh while there are running jobs
+    const interval = setInterval(() => {
+      const hasRunning = jobs.some((j) => j.status === "running" || j.status === "pending");
+      if (hasRunning || jobs.length === 0) load();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [statusFilter]);
+
+  useEffect(() => {
+    if (logJobId) {
+      const job = jobs.find((j) => j.id === logJobId);
+      if (job && job.status !== "running" && job.status !== "pending") {
+        // Job finished, keep logs visible
+      }
+    }
+  }, [jobs, logJobId]);
 
   async function handleCancel(jobId: string) {
     try {
       await cancelJob(jobId);
+      pushToast("Job cancelled", "info");
       load();
     } catch (e) {
       console.error("Cancel error:", e);
+      pushToast("Failed to cancel job", "error");
     }
   }
 
@@ -40,7 +63,10 @@ export default function JobsPage() {
         {["", "running", "completed", "failed", "pending", "cancelled"].map((s) => (
           <button
             key={s}
-            style={{ ...styles.filterBtn, ...(statusFilter === s ? styles.filterBtnActive : {}) }}
+            style={{
+              ...styles.filterBtn,
+              ...(statusFilter === s ? styles.filterBtnActive : {}),
+            }}
             onClick={() => setStatusFilter(s)}
           >
             {s || "All"}
@@ -75,17 +101,39 @@ export default function JobsPage() {
                   <td style={styles.tdMono}>{j.asset_id.slice(0, 8)}...</td>
                   <td style={styles.td}>{j.operation}</td>
                   <td style={styles.td}>
-                    <span style={{ ...styles.statusBadge, backgroundColor: statusColor(j.status) }}>
+                    <span
+                      style={{
+                        ...styles.statusBadge,
+                        backgroundColor: statusColor(j.status),
+                      }}
+                    >
                       {j.status}
                     </span>
                   </td>
-                  <td style={styles.td}>{j.size_bytes ? formatBytes(j.size_bytes) : "-"}</td>
+                  <td style={styles.td}>
+                    {j.size_bytes ? formatBytes(j.size_bytes) : "-"}
+                  </td>
                   <td style={styles.td}>{j.file_count ?? "-"}</td>
                   <td style={styles.td}>{j.error_count}</td>
-                  <td style={styles.td}>{j.started_at ? new Date(j.started_at).toLocaleString() : "-"}</td>
                   <td style={styles.td}>
-                    {j.status === "running" && (
-                      <button style={styles.cancelBtn} onClick={() => handleCancel(j.id)}>Cancel</button>
+                    {j.started_at
+                      ? new Date(j.started_at).toLocaleString()
+                      : "-"}
+                  </td>
+                  <td style={styles.td}>
+                    <button
+                      style={styles.logBtn}
+                      onClick={() => setLogJobId(j.id)}
+                    >
+                      Logs
+                    </button>
+                    {(j.status === "running" || j.status === "pending") && (
+                      <button
+                        style={{ ...styles.cancelBtn, marginLeft: 8 }}
+                        onClick={() => handleCancel(j.id)}
+                      >
+                        Cancel
+                      </button>
                     )}
                   </td>
                 </tr>
@@ -93,6 +141,10 @@ export default function JobsPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {logJobId && (
+        <LogViewer jobId={logJobId} onClose={() => setLogJobId(null)} />
       )}
     </div>
   );
@@ -134,7 +186,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#fff",
     borderColor: "#6c63ff",
   },
-  emptyState: { textAlign: "center", padding: 60, color: "#888" },
+  emptyState: { textAlign: "center" as const, padding: 60, color: "#888" },
   tableWrap: {
     backgroundColor: "#fff",
     borderRadius: 8,
@@ -142,10 +194,43 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: "auto",
   },
   table: { width: "100%", borderCollapse: "collapse" as const },
-  th: { textAlign: "left", padding: "12px 16px", fontSize: 11, fontWeight: 600, color: "#888", textTransform: "uppercase" as const, letterSpacing: 0.5, borderBottom: "1px solid #eee" },
+  th: {
+    textAlign: "left" as const,
+    padding: "12px 16px",
+    fontSize: 11,
+    fontWeight: 600,
+    color: "#888",
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+    borderBottom: "1px solid #eee",
+  },
   td: { padding: "10px 16px", fontSize: 13, color: "#333", borderTop: "1px solid #f5f5f5" },
-  tdMono: { padding: "10px 16px", fontSize: 12, fontFamily: "monospace", color: "#666", borderTop: "1px solid #f5f5f5" },
-  statusBadge: { display: "inline-block", padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 600, color: "#fff", textTransform: "capitalize" as const },
+  tdMono: {
+    padding: "10px 16px",
+    fontSize: 12,
+    fontFamily: "monospace",
+    color: "#666",
+    borderTop: "1px solid #f5f5f5",
+  },
+  statusBadge: {
+    display: "inline-block",
+    padding: "2px 8px",
+    borderRadius: 10,
+    fontSize: 11,
+    fontWeight: 600,
+    color: "#fff",
+    textTransform: "capitalize" as const,
+  },
+  logBtn: {
+    padding: "4px 10px",
+    backgroundColor: "#3182ce",
+    color: "#fff",
+    border: "none",
+    borderRadius: 4,
+    cursor: "pointer",
+    fontSize: 11,
+    fontWeight: 600,
+  },
   cancelBtn: {
     padding: "4px 10px",
     backgroundColor: "#e53e3e",

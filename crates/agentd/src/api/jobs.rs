@@ -83,12 +83,18 @@ async fn cancel_job(
 
 /// GET /api/v1/jobs/:id/log
 async fn get_job_log(
-    Path(_id): Path<String>,
+    Path(id): Path<String>,
+    State(state): State<AppState>,
 ) -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "lines": [],
-        "message": "Log streaming not yet implemented"
-    }))
+    let entries = state.progress.get_job_logs(&id);
+    let lines: Vec<serde_json::Value> = entries.into_iter().map(|e| {
+        serde_json::json!({
+            "level": e.level,
+            "message": e.message,
+            "timestamp": e.timestamp,
+        })
+    }).collect();
+    Json(serde_json::json!({ "lines": lines }))
 }
 
 fn job_to_response(j: &JobExecution) -> JobResponse {

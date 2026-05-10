@@ -1,6 +1,6 @@
 //! Job execution: dispatches to the appropriate adapter based on asset kind.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -59,8 +59,7 @@ pub async fn execute_job(
             execute_backup(&db, &progress, job_id, &asset, &sla, &config, cancel).await
         }
         "restore" => {
-            progress.job_log(job_id, "warn", "Restore execution not yet implemented");
-            Ok(())
+            execute_restore(&db, &progress, job_id, &asset, &config, cancel).await
         }
         "snapshot" => {
             progress.job_log(job_id, "warn", "Snapshot execution not yet implemented");
@@ -150,7 +149,8 @@ async fn execute_fileset_backup(
         let paths_clone = paths.to_vec();
         let target_clone = target_dir.clone();
         let job_id_owned = job_id.to_string();
-        let backend = "btrfs"; // TODO: detect from volume containing paths
+        let backend = detect_backend(paths.first().unwrap_or(&target_dir))
+            .unwrap_or_else(|| "btrfs".to_string());
         let bt = backup_type.clone();
 
         let result = tokio::task::spawn_blocking(move || {
@@ -158,7 +158,7 @@ async fn execute_fileset_backup(
                 &job_id_owned,
                 &paths_clone,
                 &target_clone,
-                backend,
+                &backend,
                 &copy_mode,
                 &bt,
                 block_size,
@@ -426,6 +426,95 @@ async fn record_backup_copy(
     Ok(())
 }
 
+async fn execute_restore(
+    db: &Arc<Database>,
+    progress: &Arc<ProgressBus>,
+    job_id: &str,
+    asset: &crate::db::models::ProtectedAsset,
+    config: &crate::api::types::AssetConfig,
+    cancel: CancellationToken,
+) -> Result<(), anyhow::Error> {
+    // Find the most recent backup copy for this asset
+    let copies = db.with_conn(|conn| crate::db::copies::list_by_asset(conn, &asset.id))?;
+    let copy = copies.into_iter().find(|c| c.status == "active")
+        .ok_or_else(|| anyhow::anyhow!("No active backup copy found for asset"))?;
+
+    let copy_data_path = copy.data_path
+        .ok_or_else(|| anyhow::anyhow!("Copy has no data path"))?;
+    let source_dir = PathBuf::from(&copy_data_path);
+
+    progress.job_log(job_id, "info", &format!(
+        "Restoring from copy: {} at {}", &copy.id, source_dir.display()
+    ));
+
+    if cancel.is_cancelled() {
+        return Err(anyhow::anyhow!("Job cancelled"));
+    }
+
+    match config {
+        crate::api::types::AssetConfig::Fileset { paths, .. } => {
+            let target = paths.first()
+                .cloned()
+                .unwrap_or_else(|| PathBuf::from("/"));
+            let adapter = FileBackupAdapter::new(db.clone(), progress.clone());
+            let src = source_dir.clone();
+            let tgt = target.clone();
+            let jid = job_id.to_string();
+
+            tokio::task::spawn_blocking(move || {
+                adapter.run_restore(&jid, &src, &tgt, bifrost::backup::RestorePolicy::Replace)
+            }).await??;
+        }
+        crate::api::types::AssetConfig::Volume { backend, volume_id } => {
+            let adapter = VolumeBackupAdapter::new(progress.clone());
+            let image_path = find_image_in_dir(&source_dir)?;
+            let be = backend.clone();
+            let vol = volume_id.clone();
+            let jid = job_id.to_string();
+
+            tokio::task::spawn_blocking(move || {
+                adapter.run_restore(&jid, &be, &vol, &image_path, true)
+            }).await??;
+        }
+        crate::api::types::AssetConfig::NasShare { url, .. } => {
+            let target = if url.starts_with("nfs://") {
+                bifrost::frame::location::DataLocation::from_nfs_url(url)
+                    .map_err(|e| anyhow::anyhow!("Invalid NFS URL: {e}"))?
+            } else if url.starts_with("smb://") {
+                bifrost::frame::location::DataLocation::from_smb_url(url)
+                    .map_err(|e| anyhow::anyhow!("Invalid SMB URL: {e}"))?
+            } else {
+                return Err(anyhow::anyhow!("Unsupported NAS URL: {url}"));
+            };
+
+            let adapter = FileBackupAdapter::new(db.clone(), progress.clone());
+            let src = source_dir.clone();
+            let jid = job_id.to_string();
+
+            tokio::task::spawn_blocking(move || {
+                adapter.run_restore_with_location(&jid, &src, target, bifrost::backup::RestorePolicy::Replace)
+            }).await??;
+        }
+    }
+
+    progress.job_log(job_id, "info", "Restore completed successfully");
+    Ok(())
+}
+
+fn find_image_in_dir(dir: &Path) -> Result<PathBuf, anyhow::Error> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name.ends_with(".img") || name.starts_with("volume_") {
+                return Ok(path);
+            }
+        }
+    }
+    Err(anyhow::anyhow!("No volume image file found in {}", dir.display()))
+}
+
 fn determine_target_dir(
     asset: &crate::db::models::ProtectedAsset,
 ) -> Result<PathBuf, anyhow::Error> {
@@ -442,4 +531,35 @@ fn determine_volume_target_dir(
     let dir = base.join(format!("asset_{}", asset.id));
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
+}
+
+/// Detect the filesystem type of the mount point containing the given path.
+///
+/// Reads /proc/self/mounts and returns the filesystem type (e.g. "btrfs", "xfs", "ext4").
+/// Falls back to None if detection fails.
+fn detect_backend(path: &Path) -> Option<String> {
+    let canonical = std::fs::canonicalize(path).ok()?;
+
+    let mounts = std::fs::read_to_string("/proc/self/mounts").ok()?;
+
+    // Find the mount point with the longest matching path
+    let mut best_match: Option<(&str, &str)> = None;
+
+    for line in mounts.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() < 3 {
+            continue;
+        }
+        let mount_point = fields[1];
+        let fs_type = fields[2];
+
+        // Check if this mount point is a prefix of our path
+        if canonical.starts_with(mount_point) {
+            if best_match.map_or(true, |(best, _)| mount_point.len() > best.len()) {
+                best_match = Some((mount_point, fs_type));
+            }
+        }
+    }
+
+    best_match.map(|(_, fs_type)| fs_type.to_string())
 }

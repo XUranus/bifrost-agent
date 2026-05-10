@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { connectAgent, disconnectAgent, getSettings } from "./api/client";
+import { ToastProvider } from "./components/Toast";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import AssetsPage from "./pages/Assets";
@@ -58,15 +59,17 @@ export default function App() {
   }
 
   return (
-    <Layout agentUrl={agentUrl} onDisconnect={handleDisconnect}>
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/assets" element={<AssetsPage />} />
-        <Route path="/assets/:id" element={<AssetDetail />} />
-        <Route path="/jobs" element={<JobsPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Layout>
+    <ToastProvider>
+      <Layout agentUrl={agentUrl} onDisconnect={handleDisconnect}>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/assets" element={<AssetsPage />} />
+          <Route path="/assets/:id" element={<AssetDetail />} />
+          <Route path="/jobs" element={<JobsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Layout>
+    </ToastProvider>
   );
 }

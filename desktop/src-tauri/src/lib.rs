@@ -51,6 +51,7 @@ pub fn run() {
             commands::get_job,
             commands::start_job,
             commands::cancel_job,
+            commands::get_job_logs,
             commands::list_backup_copies,
             commands::delete_backup_copy,
             commands::start_restore,

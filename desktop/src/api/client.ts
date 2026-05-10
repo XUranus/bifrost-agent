@@ -111,6 +111,12 @@ export async function cancelJob(id: string): Promise<unknown> {
   return invoke("cancel_job", { id });
 }
 
+export async function getJobLogs(
+  id: string
+): Promise<{ lines: { level: string; message: string; timestamp: string }[] }> {
+  return invoke("get_job_logs", { id });
+}
+
 // Backup Copies
 export async function listBackupCopies(assetId: string): Promise<BackupCopyResponse[]> {
   return invoke("list_backup_copies", { assetId });

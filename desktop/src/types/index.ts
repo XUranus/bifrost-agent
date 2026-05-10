@@ -77,8 +77,15 @@ export interface JobProgress {
 export interface BackupCopyResponse {
   id: string;
   asset_id: string;
+  job_id: string;
   kind: string;
+  copy_uuid: string | null;
+  parent_copy_id: string | null;
   size_bytes: number | null;
+  file_count: number | null;
+  manifest_path: string | null;
+  data_path: string | null;
+  expires_at: string | null;
   status: string;
   created_at: string;
 }

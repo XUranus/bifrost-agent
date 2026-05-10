@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { listAssets, startJob } from "../api/client";
+import { useToast } from "../components/Toast";
 import type { AssetResponse } from "../types";
 
 export default function AssetsPage() {
@@ -8,6 +9,7 @@ export default function AssetsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const { pushToast } = useToast();
 
   async function load() {
     try {
@@ -24,9 +26,11 @@ export default function AssetsPage() {
   async function handleBackup(assetId: string) {
     try {
       await startJob(assetId, "backup");
+      pushToast("Backup job started", "success");
       navigate("/jobs");
     } catch (e) {
       setError(String(e));
+      pushToast("Failed to start backup", "error");
     }
   }
 
