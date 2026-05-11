@@ -4,10 +4,12 @@ interface Toast {
   id: number;
   message: string;
   type: "success" | "error" | "info";
+  action?: { label: string; onClick: () => void };
+  persistent?: boolean;
 }
 
 interface ToastContextValue {
-  pushToast: (message: string, type?: "success" | "error" | "info") => void;
+  pushToast: (message: string, type?: "success" | "error" | "info", opts?: { action?: Toast["action"]; persistent?: boolean }) => void;
 }
 
 const ToastContext = createContext<ToastContextValue>({
@@ -20,57 +22,48 @@ export function useToast() {
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [counter, setCounter] = useState(0);
+  const counterRef = { current: 0 };
 
   const pushToast = useCallback(
-    (message: string, type: "success" | "error" | "info" = "info") => {
-      const id = counter + 1;
-      setCounter(id);
-      setToasts((prev) => [...prev, { id, message, type }]);
-      setTimeout(() => {
-        setToasts((prev) => prev.filter((t) => t.id !== id));
-      }, 4000);
+    (message: string, type: "success" | "error" | "info" = "info", opts?: { action?: Toast["action"]; persistent?: boolean }) => {
+      // Dedup: if same message exists, bump its timeout
+      setToasts((prev) => {
+        const existing = prev.find((t) => t.message === message && t.type === type);
+        if (existing) return prev;
+        counterRef.current += 1;
+        const id = counterRef.current;
+        const toast: Toast = { id, message, type, ...opts };
+        if (!opts?.persistent) {
+          setTimeout(() => {
+            setToasts((p) => p.filter((t) => t.id !== id));
+          }, 4000);
+        }
+        return [...prev, toast];
+      });
     },
-    [counter]
+    []
   );
+
+  function dismissToast(id: number) {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }
 
   return (
     <ToastContext.Provider value={{ pushToast }}>
       {children}
-      <div style={styles.container}>
+      <div className="toast-container">
         {toasts.map((t) => (
-          <div key={t.id} style={{ ...styles.toast, ...stylesByType[t.type] }}>
-            {t.message}
+          <div key={t.id} className={`toast toast-${t.type}`}>
+            <span>{t.message}</span>
+            {t.action && (
+              <button className="toast-action" onClick={t.action.onClick}>{t.action.label}</button>
+            )}
+            {t.persistent && (
+              <button className="toast-close" onClick={() => dismissToast(t.id)}>&times;</button>
+            )}
           </div>
         ))}
       </div>
     </ToastContext.Provider>
   );
 }
-
-const stylesByType: Record<string, React.CSSProperties> = {
-  success: { backgroundColor: "#38a169", color: "#fff" },
-  error: { backgroundColor: "#e53e3e", color: "#fff" },
-  info: { backgroundColor: "#3182ce", color: "#fff" },
-};
-
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    position: "fixed",
-    bottom: 20,
-    right: 20,
-    display: "flex",
-    flexDirection: "column",
-    gap: 8,
-    zIndex: 9999,
-  },
-  toast: {
-    padding: "12px 20px",
-    borderRadius: 8,
-    fontSize: 13,
-    fontWeight: 500,
-    boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-    minWidth: 250,
-    maxWidth: 400,
-  },
-};

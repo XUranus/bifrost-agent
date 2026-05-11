@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { parseAgentError, type AgentError } from "../api/client";
 
 interface Props {
   onConnect: (url: string, token: string) => void;
@@ -16,37 +17,46 @@ export default function ConnectPage({ onConnect, error, initialUrl, initialToken
     onConnect(url, token);
   }
 
+  const parsedError: AgentError | null = error ? parseAgentError(error) : null;
+
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        <h1 style={styles.title}>Bifrost Desktop</h1>
-        <p style={styles.subtitle}>Connect to a Bifrost Agent</p>
-        <form onSubmit={handleSubmit} style={styles.form}>
-          <label style={styles.label}>
+    <div className="connect-page">
+      <div className="glass-card connect-card">
+        <h1>Bifrost Desktop</h1>
+        <p className="subtitle">Connect to a Bifrost Agent</p>
+        <form onSubmit={handleSubmit} className="connect-form">
+          <label>
             Agent URL
             <input
-              style={styles.input}
+              className="glass-input"
               type="text"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="http://127.0.0.1:8787"
             />
           </label>
-          <label style={styles.label}>
+          <label>
             Auth Token
             <input
-              style={styles.input}
+              className="glass-input"
               type="password"
               value={token}
               onChange={(e) => setToken(e.target.value)}
               placeholder="64-character hex token"
             />
           </label>
-          <p style={styles.hint}>
+          <p className="hint">
             Find the token in your agent&apos;s data directory (e.g. <code>/var/lib/bifrost-agent/agent.key</code>)
           </p>
-          {error && <p style={styles.error}>{error}</p>}
-          <button style={styles.button} type="submit">
+          {parsedError && (
+            <div className={`connect-error connect-error-${parsedError.code}`}>
+              <span className="connect-error-icon">
+                {parsedError.code === "auth" ? "🔒" : parsedError.code === "network" ? "📡" : parsedError.code === "timeout" ? "⏱" : "⚠"}
+              </span>
+              <span>{parsedError.message}</span>
+            </div>
+          )}
+          <button className="btn-primary btn-lg" type="submit">
             Connect
           </button>
         </form>
@@ -54,44 +64,3 @@ export default function ConnectPage({ onConnect, error, initialUrl, initialToken
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100vh",
-    backgroundColor: "#1a1a2e",
-  },
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 40,
-    width: 400,
-    boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
-  },
-  title: { fontSize: 24, fontWeight: 700, textAlign: "center", marginBottom: 4 },
-  subtitle: { fontSize: 14, color: "#666", textAlign: "center", marginBottom: 24 },
-  form: { display: "flex", flexDirection: "column", gap: 16 },
-  label: { fontSize: 13, fontWeight: 600, color: "#333", display: "flex", flexDirection: "column", gap: 6 },
-  input: {
-    padding: "10px 12px",
-    borderRadius: 6,
-    border: "1px solid #ddd",
-    fontSize: 14,
-    outline: "none",
-  },
-  hint: { fontSize: 12, color: "#888", margin: 0, lineHeight: 1.5 },
-  error: { color: "#e53e3e", fontSize: 13, padding: "8px 12px", backgroundColor: "#fff5f5", borderRadius: 6 },
-  button: {
-    padding: "12px 0",
-    backgroundColor: "#6c63ff",
-    color: "#fff",
-    border: "none",
-    borderRadius: 6,
-    fontSize: 15,
-    fontWeight: 600,
-    cursor: "pointer",
-    marginTop: 8,
-  },
-};

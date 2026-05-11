@@ -135,3 +135,49 @@ export async function startRestore(body: unknown): Promise<JobResponse> {
 export async function browseCopy(copyId: string, path?: string): Promise<DirEntry[]> {
   return invoke("browse_copy", { copyId, path: path ?? null });
 }
+
+// Agent Profiles
+export interface AgentProfile {
+  name: string;
+  url: string;
+  token: string;
+}
+
+export async function listAgentProfiles(): Promise<AgentProfile[]> {
+  return invoke("list_agent_profiles");
+}
+
+export async function addAgentProfile(name: string, url: string, token: string): Promise<void> {
+  return invoke("add_agent_profile", { name, url, token });
+}
+
+export async function removeAgentProfile(name: string): Promise<void> {
+  return invoke("remove_agent_profile", { name });
+}
+
+export async function setActiveAgent(name: string): Promise<void> {
+  return invoke("set_active_agent", { name });
+}
+
+// Error parsing
+export interface AgentError {
+  code: "auth" | "network" | "timeout" | "not_found" | "unknown";
+  message: string;
+}
+
+export function parseAgentError(e: unknown): AgentError {
+  const s = String(e);
+  if (s.includes("Unauthorized") || s.includes("401")) {
+    return { code: "auth", message: "Authentication failed. Check your agent token." };
+  }
+  if (s.includes("Connection refused") || s.includes("Failed to reach") || s.includes("NetworkError")) {
+    return { code: "network", message: "Cannot reach the agent. Is it running at this URL?" };
+  }
+  if (s.includes("timed out") || s.includes("timeout")) {
+    return { code: "timeout", message: "Connection timed out. Check the URL and network." };
+  }
+  if (s.includes("not found") || s.includes("404")) {
+    return { code: "not_found", message: "Resource not found." };
+  }
+  return { code: "unknown", message: s };
+}

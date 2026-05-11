@@ -36,6 +36,10 @@ pub fn run() {
             commands::connect_agent,
             commands::disconnect_agent,
             commands::get_agent_info,
+            commands::list_agent_profiles,
+            commands::add_agent_profile,
+            commands::remove_agent_profile,
+            commands::set_active_agent,
             commands::list_assets,
             commands::create_asset,
             commands::get_asset,
@@ -58,6 +62,7 @@ pub fn run() {
             commands::browse_copy,
             commands::get_health,
             commands::get_settings,
+            commands::start_event_stream,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

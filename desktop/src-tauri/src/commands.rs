@@ -1,7 +1,7 @@
-use tauri::State;
+use tauri::{AppHandle, State};
 use crate::agent_client::AgentClient;
 use crate::agent_client::types::*;
-use crate::settings::Settings;
+use crate::settings::{Settings, AgentProfile};
 use crate::AppState;
 
 fn get_client(state: &AppState) -> Result<AgentClient, String> {
@@ -20,17 +20,14 @@ pub async fn connect_agent(
     url: String,
     token: String,
 ) -> Result<(), String> {
-    // Validate the connection by calling health
     let client = AgentClient::new(url.clone(), token.clone()).map_err(|e| e.to_string())?;
     client.get::<HealthResponse>("/api/v1/health")
         .await
         .map_err(|e| format!("Failed to reach agent at {url}: {e}"))?;
 
-    // Store the connection details
     *state.agent_url.lock().unwrap() = Some(url);
     *state.agent_token.lock().unwrap() = Some(token);
 
-    // Persist to settings
     let mut settings = state.settings.lock().unwrap().clone();
     settings.agent_url = state.agent_url.lock().unwrap().clone();
     settings.agent_token = state.agent_token.lock().unwrap().clone();
@@ -56,6 +53,68 @@ pub async fn get_agent_info(state: State<'_, AppState>) -> Result<AgentInfoRespo
 pub async fn get_health(state: State<'_, AppState>) -> Result<HealthResponse, String> {
     let client = get_client(&state)?;
     client.get("/api/v1/health").await.map_err(|e| e.to_string())
+}
+
+// --- Agent Profiles ---
+
+#[tauri::command]
+pub async fn list_agent_profiles(state: State<'_, AppState>) -> Result<Vec<AgentProfile>, String> {
+    let settings = state.settings.lock().unwrap();
+    Ok(settings.agent_profiles.clone())
+}
+
+#[tauri::command]
+pub async fn add_agent_profile(
+    state: State<'_, AppState>,
+    name: String,
+    url: String,
+    token: String,
+) -> Result<(), String> {
+    let mut settings = state.settings.lock().unwrap().clone();
+    // Replace if name exists
+    settings.agent_profiles.retain(|p| p.name != name);
+    settings.agent_profiles.push(AgentProfile { name, url, token });
+    crate::settings::save_settings(&settings).map_err(|e| e.to_string())?;
+    *state.settings.lock().unwrap() = settings;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn remove_agent_profile(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<(), String> {
+    let mut settings = state.settings.lock().unwrap().clone();
+    settings.agent_profiles.retain(|p| p.name != name);
+    if settings.active_profile.as_ref() == Some(&name) {
+        settings.active_profile = None;
+    }
+    crate::settings::save_settings(&settings).map_err(|e| e.to_string())?;
+    *state.settings.lock().unwrap() = settings;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_active_agent(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<(), String> {
+    let mut settings = state.settings.lock().unwrap().clone();
+    let profile = settings.agent_profiles.iter()
+        .find(|p| p.name == name)
+        .ok_or_else(|| format!("Profile '{name}' not found"))?
+        .clone();
+
+    settings.active_profile = Some(name);
+    settings.agent_url = Some(profile.url.clone());
+    settings.agent_token = Some(profile.token.clone());
+
+    *state.agent_url.lock().unwrap() = Some(profile.url);
+    *state.agent_token.lock().unwrap() = Some(profile.token);
+
+    crate::settings::save_settings(&settings).map_err(|e| e.to_string())?;
+    *state.settings.lock().unwrap() = settings;
+    Ok(())
 }
 
 // --- Assets ---
@@ -273,4 +332,25 @@ pub async fn browse_copy(
         None => format!("/api/v1/browse/{copy_id}"),
     };
     client.get(&url).await.map_err(|e| e.to_string())
+}
+
+// --- WebSocket Event Stream ---
+
+#[tauri::command]
+pub async fn start_event_stream(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let url = state.agent_url.lock().unwrap().clone()
+        .ok_or_else(|| "No agent connected".to_string())?;
+    let token = state.agent_token.lock().unwrap().clone()
+        .ok_or_else(|| "No agent token configured".to_string())?;
+
+    tokio::spawn(async move {
+        if let Err(e) = crate::agent_client::ws::connect_ws(&url, &token, app).await {
+            tracing::warn!("WebSocket event stream ended: {e}");
+        }
+    });
+
+    Ok(())
 }

@@ -1,10 +1,21 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { getJobLogs } from "../api/client";
+import { useJobLogEvents, useAgentEvents } from "../hooks/useAgentEvents";
+import { useI18n } from "../i18n";
+import JobProgress from "./JobProgress";
 
 interface LogLine {
   level: string;
   message: string;
   timestamp: string;
+}
+
+interface ProgressData {
+  phase: string;
+  percent: number;
+  throughput_bytes_per_sec: number;
+  eta_seconds: number;
+  current_item: string;
 }
 
 interface Props {
@@ -13,26 +24,52 @@ interface Props {
 }
 
 export default function LogViewer({ jobId, onClose }: Props) {
+  const { t } = useI18n();
   const [lines, setLines] = useState<LogLine[]>([]);
   const [loading, setLoading] = useState(true);
+  const [progress, setProgress] = useState<ProgressData | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  async function fetchLogs() {
-    try {
-      const result = await getJobLogs(jobId);
-      setLines(result.lines || []);
-    } catch (e) {
-      console.error("Failed to fetch logs:", e);
-    } finally {
-      setLoading(false);
-    }
-  }
+  useEffect(() => {
+    setLoading(true);
+    getJobLogs(jobId)
+      .then((result) => setLines(result.lines || []))
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [jobId]);
 
   useEffect(() => {
-    fetchLogs();
-    const interval = setInterval(fetchLogs, 2000);
+    const interval = setInterval(() => {
+      getJobLogs(jobId)
+        .then((result) => setLines(result.lines || []))
+        .catch(console.error);
+    }, 10000);
     return () => clearInterval(interval);
   }, [jobId]);
+
+  const appendLine = useCallback((entry: LogLine) => {
+    setLines((prev) => [...prev, entry]);
+  }, []);
+  useJobLogEvents(jobId, appendLine);
+
+  useAgentEvents({
+    onJobProgress: (e) => {
+      if (e.job_id === jobId) {
+        setProgress({
+          phase: e.phase,
+          percent: e.percent,
+          throughput_bytes_per_sec: e.throughput_bytes_per_sec,
+          eta_seconds: e.eta_seconds,
+          current_item: e.current_item,
+        });
+      }
+    },
+    onJobStatus: (e) => {
+      if (e.job_id === jobId && (e.status === "completed" || e.status === "failed" || e.status === "cancelled")) {
+        setProgress(null);
+      }
+    },
+  });
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -41,29 +78,32 @@ export default function LogViewer({ jobId, onClose }: Props) {
   }, [lines]);
 
   return (
-    <div style={styles.overlay}>
-      <div style={styles.panel}>
-        <div style={styles.header}>
-          <span style={styles.title}>Job Logs: {jobId.slice(0, 8)}...</span>
-          <button style={styles.closeBtn} onClick={onClose}>
-            Close
-          </button>
+    <div className="log-overlay">
+      <div className="glass-modal log-panel">
+        <div className="log-header">
+          <span>{t("log.title")}: {jobId.slice(0, 8)}...</span>
+          <button className="btn-ghost btn-sm" onClick={onClose}>{t("log.close")}</button>
         </div>
-        <div ref={scrollRef} style={styles.logArea}>
+        {progress && (
+          <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--glass-border-subtle)" }}>
+            <JobProgress data={progress} />
+          </div>
+        )}
+        <div ref={scrollRef} className="log-area">
           {loading ? (
-            <p style={styles.loading}>Loading logs...</p>
+            <p className="log-loading">{t("log.loading")}</p>
           ) : lines.length === 0 ? (
-            <p style={styles.loading}>No log entries yet</p>
+            <p className="log-loading">{t("log.noEntries")}</p>
           ) : (
             lines.map((line, i) => (
-              <div key={i} style={styles.line}>
-                <span style={styles.timestamp}>
+              <div key={i} className="log-line">
+                <span className="log-timestamp">
                   {new Date(line.timestamp).toLocaleTimeString()}
                 </span>
-                <span style={{ ...styles.level, color: levelColor(line.level) }}>
+                <span className="log-level" style={{ color: levelColor(line.level) }}>
                   {line.level.toUpperCase()}
                 </span>
-                <span style={styles.message}>{line.message}</span>
+                <span className="log-message">{line.message}</span>
               </div>
             ))
           )}
@@ -75,88 +115,9 @@ export default function LogViewer({ jobId, onClose }: Props) {
 
 function levelColor(level: string): string {
   switch (level) {
-    case "error": return "#e53e3e";
-    case "warn": return "#d69e2e";
-    case "info": return "#3182ce";
-    default: return "#888";
+    case "error": return "var(--status-error)";
+    case "warn": return "var(--status-warn)";
+    case "info": return "var(--status-info)";
+    default: return "var(--text-tertiary)";
   }
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  overlay: {
-    position: "fixed",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 1000,
-  },
-  panel: {
-    backgroundColor: "#1a1a2e",
-    borderRadius: 12,
-    width: 700,
-    maxWidth: "90vw",
-    height: 500,
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
-    boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "12px 16px",
-    backgroundColor: "#2d2d44",
-  },
-  title: {
-    color: "#fff",
-    fontSize: 13,
-    fontFamily: "monospace",
-  },
-  closeBtn: {
-    padding: "4px 12px",
-    backgroundColor: "#444",
-    color: "#fff",
-    border: "none",
-    borderRadius: 4,
-    cursor: "pointer",
-    fontSize: 12,
-  },
-  logArea: {
-    flex: 1,
-    overflow: "auto",
-    padding: 12,
-    fontFamily: "monospace",
-    fontSize: 12,
-  },
-  line: {
-    display: "flex",
-    gap: 8,
-    padding: "2px 0",
-    borderBottom: "1px solid #2d2d44",
-  },
-  timestamp: {
-    color: "#666",
-    minWidth: 70,
-  },
-  level: {
-    minWidth: 45,
-    fontWeight: 600,
-    fontSize: 11,
-  },
-  message: {
-    color: "#ddd",
-    whiteSpace: "pre-wrap" as const,
-    wordBreak: "break-all" as const,
-  },
-  loading: {
-    color: "#666",
-    textAlign: "center" as const,
-    padding: 20,
-  },
-};

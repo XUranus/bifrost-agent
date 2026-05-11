@@ -2,12 +2,21 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentProfile {
+    pub name: String,
+    pub url: String,
+    pub token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub agent_url: Option<String>,
     pub agent_token: Option<String>,
     pub theme: String,
     pub window_width: Option<u32>,
     pub window_height: Option<u32>,
+    pub agent_profiles: Vec<AgentProfile>,
+    pub active_profile: Option<String>,
 }
 
 impl Default for Settings {
@@ -18,6 +27,8 @@ impl Default for Settings {
             theme: "system".into(),
             window_width: None,
             window_height: None,
+            agent_profiles: Vec::new(),
+            active_profile: None,
         }
     }
 }
@@ -37,7 +48,19 @@ pub fn load_settings() -> Result<Settings, anyhow::Error> {
     let path = settings_path();
     if path.exists() {
         let data = std::fs::read_to_string(&path)?;
-        Ok(serde_json::from_str(&data)?)
+        let mut settings: Settings = serde_json::from_str(&data)?;
+        // Migrate: if no profiles but has agent_url, create a default profile
+        if settings.agent_profiles.is_empty() {
+            if let Some(url) = &settings.agent_url {
+                settings.agent_profiles.push(AgentProfile {
+                    name: "Default".into(),
+                    url: url.clone(),
+                    token: settings.agent_token.clone().unwrap_or_default(),
+                });
+                settings.active_profile = Some("Default".into());
+            }
+        }
+        Ok(settings)
     } else {
         let settings = Settings::default();
         save_settings(&settings)?;
