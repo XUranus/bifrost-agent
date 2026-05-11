@@ -60,7 +60,12 @@ impl CronScheduler {
                 continue;
             }
 
-            let sla = match self.db.with_conn(|conn| crate::db::slas::get_by_id(conn, &asset.sla_policy_id)) {
+            let sla_id = match &asset.sla_policy_id {
+                Some(id) => id.clone(),
+                None => continue,
+            };
+
+            let sla = match self.db.with_conn(|conn| crate::db::slas::get_by_id(conn, &sla_id)) {
                 Ok(Some(s)) => s,
                 _ => continue,
             };

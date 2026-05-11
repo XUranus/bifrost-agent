@@ -3,41 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { createAsset } from "../api/client";
 import { useToast } from "../components/Toast";
 import { useI18n } from "../i18n";
+import PathPicker from "../components/PathPicker";
 
 type AssetKind = "fileset" | "volume" | "nas_share";
-
-interface SLAForm {
-  name: string;
-  copy_mode: string;
-  backup_type: string;
-  schedule_cron: string;
-  block_size: number;
-  subtask_count: number;
-  memory_limit_mb: number;
-  retention_kind: string;
-  retention_value: number;
-}
-
-const DEFAULT_SLA: SLAForm = {
-  name: "Default",
-  copy_mode: "common",
-  backup_type: "full",
-  schedule_cron: "0 2 * * *",
-  block_size: 1_048_576,
-  subtask_count: 4,
-  memory_limit_mb: 512,
-  retention_kind: "by_count",
-  retention_value: 7,
-};
-
-function getSchedulePresets(t: (k: string) => string) {
-  return [
-    { label: t("newAsset.everyHour"), cron: "0 * * * *" },
-    { label: t("newAsset.daily2am"), cron: "0 2 * * *" },
-    { label: t("newAsset.weeklySunday"), cron: "0 2 * * 0" },
-    { label: t("newAsset.custom"), cron: "" },
-  ];
-}
 
 export default function NewAsset() {
   const navigate = useNavigate();
@@ -55,16 +23,16 @@ export default function NewAsset() {
   const [consistency, setConsistency] = useState(false);
   const [volumeBackend, setVolumeBackend] = useState("btrfs");
   const [volumeId, setVolumeId] = useState("");
-  const [nasUrl, setNasUrl] = useState("");
-  const [nasCredential, setNasCredential] = useState("");
-
-  // Step 2: SLA
-  const [sla, setSla] = useState<SLAForm>(DEFAULT_SLA);
-  const [customCron, setCustomCron] = useState(false);
-
-  function updateSla(field: keyof SLAForm, value: string | number) {
-    setSla((prev) => ({ ...prev, [field]: value }));
-  }
+  const [nasProtocol, setNasProtocol] = useState<"smb" | "nfs">("smb");
+  const [nasHost, setNasHost] = useState("");
+  const [nasShare, setNasShare] = useState("");
+  const [nasExport, setNasExport] = useState("");
+  const [nasSubpath, setNasSubpath] = useState("");
+  const [nasUsername, setNasUsername] = useState("");
+  const [nasPassword, setNasPassword] = useState("");
+  const [nasPort, setNasPort] = useState("");
+  const [nasUid, setNasUid] = useState("0");
+  const [nasGid, setNasGid] = useState("0");
 
   function canProceed(): boolean {
     switch (step) {
@@ -73,9 +41,8 @@ export default function NewAsset() {
         if (!name.trim()) return false;
         if (kind === "fileset") return paths.some((p) => p.trim());
         if (kind === "volume") return volumeId.trim() !== "";
-        if (kind === "nas_share") return nasUrl.trim() !== "";
+        if (kind === "nas_share") return nasHost.trim() !== "" && (nasProtocol === "smb" ? nasShare.trim() !== "" : nasExport.trim() !== "");
         return false;
-      case 2: return sla.name.trim() !== "" && sla.schedule_cron.trim() !== "";
       default: return false;
     }
   }
@@ -84,22 +51,7 @@ export default function NewAsset() {
     setSubmitting(true);
     try {
       const config = buildConfig();
-      const body = {
-        name,
-        kind,
-        config,
-        sla_policy: {
-          name: sla.name,
-          copy_mode: sla.copy_mode,
-          backup_type: sla.backup_type,
-          schedule_cron: sla.schedule_cron,
-          block_size: sla.block_size,
-          subtask_count: sla.subtask_count,
-          memory_limit_mb: sla.memory_limit_mb,
-          retention_kind: sla.retention_kind,
-          retention_value: sla.retention_value,
-        },
-      };
+      const body = { name, kind, config };
       await createAsset(body);
       pushToast(t("newAsset.created"), "success");
       navigate("/assets");
@@ -122,7 +74,33 @@ export default function NewAsset() {
       case "volume":
         return { type: "Volume", backend: volumeBackend, volume_id: volumeId };
       case "nas_share":
-        return { type: "NasShare", url: nasUrl, credential_id: nasCredential || null };
+        return { type: "NasShare", url: buildNasUrl(), credential_id: null };
+    }
+  }
+
+  function buildNasUrl(): string {
+    if (nasProtocol === "smb") {
+      let url = `smb://${nasHost}`;
+      if (nasPort && nasPort !== "445") url += `:${nasPort}`;
+      url += `/${nasShare}`;
+      if (nasSubpath) url += nasSubpath.startsWith("/") ? nasSubpath : `/${nasSubpath}`;
+      const params = new URLSearchParams();
+      if (nasUsername) params.set("username", nasUsername);
+      if (nasPassword) params.set("password", nasPassword);
+      const qs = params.toString();
+      if (qs) url += `?${qs}`;
+      return url;
+    } else {
+      let url = `nfs://${nasHost}`;
+      if (nasPort && nasPort !== "2049") url += `:${nasPort}`;
+      url += nasExport.startsWith("/") ? nasExport : `/${nasExport}`;
+      if (nasSubpath) url += nasSubpath.startsWith("/") ? nasSubpath : `/${nasSubpath}`;
+      const params = new URLSearchParams();
+      if (nasUid !== "0") params.set("uid", nasUid);
+      if (nasGid !== "0") params.set("gid", nasGid);
+      const qs = params.toString();
+      if (qs) url += `?${qs}`;
+      return url;
     }
   }
 
@@ -137,7 +115,7 @@ export default function NewAsset() {
 
       {/* Step indicator */}
       <div style={{ display: "flex", gap: 8, marginBottom: 28 }}>
-        {[t("newAsset.stepType"), t("newAsset.stepConfig"), t("newAsset.stepSla")].map((label, i) => (
+        {[t("newAsset.stepType"), t("newAsset.stepConfig")].map((label, i) => (
           <div
             key={i}
             style={{
@@ -172,16 +150,16 @@ export default function NewAsset() {
             consistency={consistency} setConsistency={setConsistency}
             volumeBackend={volumeBackend} setVolumeBackend={setVolumeBackend}
             volumeId={volumeId} setVolumeId={setVolumeId}
-            nasUrl={nasUrl} setNasUrl={setNasUrl}
-            nasCredential={nasCredential} setNasCredential={setNasCredential}
-          />
-        )}
-        {step === 2 && (
-          <StepSLA
-            sla={sla}
-            updateSla={updateSla}
-            customCron={customCron}
-            setCustomCron={setCustomCron}
+            nasProtocol={nasProtocol} setNasProtocol={setNasProtocol}
+            nasHost={nasHost} setNasHost={setNasHost}
+            nasShare={nasShare} setNasShare={setNasShare}
+            nasExport={nasExport} setNasExport={setNasExport}
+            nasSubpath={nasSubpath} setNasSubpath={setNasSubpath}
+            nasUsername={nasUsername} setNasUsername={setNasUsername}
+            nasPassword={nasPassword} setNasPassword={setNasPassword}
+            nasPort={nasPort} setNasPort={setNasPort}
+            nasUid={nasUid} setNasUid={setNasUid}
+            nasGid={nasGid} setNasGid={setNasGid}
           />
         )}
 
@@ -193,7 +171,7 @@ export default function NewAsset() {
           >
             {t("common.back")}
           </button>
-          {step < 2 ? (
+          {step < 1 ? (
             <button
               className="btn-primary"
               onClick={() => setStep((s) => s + 1)}
@@ -262,15 +240,27 @@ interface StepConfigProps {
   consistency: boolean; setConsistency: (v: boolean) => void;
   volumeBackend: string; setVolumeBackend: (v: string) => void;
   volumeId: string; setVolumeId: (v: string) => void;
-  nasUrl: string; setNasUrl: (v: string) => void;
-  nasCredential: string; setNasCredential: (v: string) => void;
+  nasProtocol: "smb" | "nfs"; setNasProtocol: (v: "smb" | "nfs") => void;
+  nasHost: string; setNasHost: (v: string) => void;
+  nasShare: string; setNasShare: (v: string) => void;
+  nasExport: string; setNasExport: (v: string) => void;
+  nasSubpath: string; setNasSubpath: (v: string) => void;
+  nasUsername: string; setNasUsername: (v: string) => void;
+  nasPassword: string; setNasPassword: (v: string) => void;
+  nasPort: string; setNasPort: (v: string) => void;
+  nasUid: string; setNasUid: (v: string) => void;
+  nasGid: string; setNasGid: (v: string) => void;
 }
 
 function StepConfig(props: StepConfigProps) {
   const { t } = useI18n();
   const { kind, name, setName, paths, setPaths, consistency, setConsistency,
     volumeBackend, setVolumeBackend, volumeId, setVolumeId,
-    nasUrl, setNasUrl, nasCredential, setNasCredential } = props;
+    nasProtocol, setNasProtocol, nasHost, setNasHost,
+    nasShare, setNasShare, nasExport, setNasExport, nasSubpath, setNasSubpath,
+    nasUsername, setNasUsername, nasPassword, setNasPassword,
+    nasPort, setNasPort, nasUid, setNasUid, nasGid, setNasGid } = props;
+  const [pathPickerIndex, setPathPickerIndex] = useState<number | null>(null);
 
   return (
     <div>
@@ -287,17 +277,11 @@ function StepConfig(props: StepConfigProps) {
             <label style={labelStyle}>
               {t("newAsset.backupPaths")}
               {paths.map((p, i) => (
-                <div key={i} style={{ display: "flex", gap: 8 }}>
-                  <input
-                    className="glass-input"
-                    value={p}
-                    onChange={(e) => {
-                      const next = [...paths];
-                      next[i] = e.target.value;
-                      setPaths(next);
-                    }}
-                    placeholder="/home/user/data"
-                  />
+                <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <span className="glass-input" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minHeight: 38, display: "flex", alignItems: "center", fontFamily: "'SF Mono', monospace", fontSize: 13 }}>
+                    {p || t("newAsset.assetNamePlaceholder")}
+                  </span>
+                  <button className="btn-secondary btn-sm" onClick={() => setPathPickerIndex(i)}>{t("pathPicker.browse")}</button>
                   {paths.length > 1 && (
                     <button className="btn-ghost btn-sm" onClick={() => setPaths(paths.filter((_, j) => j !== i))}>{t("newAsset.remove")}</button>
                   )}
@@ -331,126 +315,85 @@ function StepConfig(props: StepConfigProps) {
 
         {kind === "nas_share" && (
           <>
+            <div>
+              <span style={labelStyle}>{t("newAsset.nasProtocol")}</span>
+              <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                <button className={`btn-pill${nasProtocol === "smb" ? " btn-pill-active" : ""}`} onClick={() => setNasProtocol("smb")}>{t("newAsset.nasSmb")}</button>
+                <button className={`btn-pill${nasProtocol === "nfs" ? " btn-pill-active" : ""}`} onClick={() => setNasProtocol("nfs")}>{t("newAsset.nasNfs")}</button>
+              </div>
+            </div>
+
             <label style={labelStyle}>
-              {t("newAsset.nasUrl")}
-              <input className="glass-input" value={nasUrl} onChange={(e) => setNasUrl(e.target.value)} placeholder="nfs://server/share or smb://server/share" />
+              {t("newAsset.nasServer")}
+              <input className="glass-input" value={nasHost} onChange={(e) => setNasHost(e.target.value)} placeholder="192.168.1.10" />
             </label>
-            <label style={labelStyle}>
-              {t("newAsset.credentialId")}
-              <input className="glass-input" value={nasCredential} onChange={(e) => setNasCredential(e.target.value)} placeholder="Leave empty if not needed" />
-            </label>
+
+            {nasProtocol === "smb" ? (
+              <>
+                <label style={labelStyle}>
+                  {t("newAsset.nasShareName")}
+                  <input className="glass-input" value={nasShare} onChange={(e) => setNasShare(e.target.value)} placeholder="shared" />
+                </label>
+                <label style={labelStyle}>
+                  {t("newAsset.nasSubpath")}
+                  <input className="glass-input" value={nasSubpath} onChange={(e) => setNasSubpath(e.target.value)} placeholder="/backup/data" />
+                </label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                  <label style={labelStyle}>
+                    {t("newAsset.nasUsername")}
+                    <input className="glass-input" value={nasUsername} onChange={(e) => setNasUsername(e.target.value)} />
+                  </label>
+                  <label style={labelStyle}>
+                    {t("newAsset.nasPassword")}
+                    <input className="glass-input" type="password" value={nasPassword} onChange={(e) => setNasPassword(e.target.value)} />
+                  </label>
+                </div>
+                <label style={labelStyle}>
+                  {t("newAsset.nasPort")}
+                  <input className="glass-input" value={nasPort} onChange={(e) => setNasPort(e.target.value)} placeholder="445" />
+                </label>
+              </>
+            ) : (
+              <>
+                <label style={labelStyle}>
+                  {t("newAsset.nasExport")}
+                  <input className="glass-input" value={nasExport} onChange={(e) => setNasExport(e.target.value)} placeholder="/export/data" />
+                </label>
+                <label style={labelStyle}>
+                  {t("newAsset.nasSubpath")}
+                  <input className="glass-input" value={nasSubpath} onChange={(e) => setNasSubpath(e.target.value)} placeholder="/backup" />
+                </label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+                  <label style={labelStyle}>
+                    {t("newAsset.nasUid")}
+                    <input className="glass-input" type="number" value={nasUid} onChange={(e) => setNasUid(e.target.value)} />
+                  </label>
+                  <label style={labelStyle}>
+                    {t("newAsset.nasGid")}
+                    <input className="glass-input" type="number" value={nasGid} onChange={(e) => setNasGid(e.target.value)} />
+                  </label>
+                  <label style={labelStyle}>
+                    {t("newAsset.nasPort")}
+                    <input className="glass-input" value={nasPort} onChange={(e) => setNasPort(e.target.value)} placeholder="2049" />
+                  </label>
+                </div>
+              </>
+            )}
           </>
         )}
       </div>
-    </div>
-  );
-}
-
-/* --- Step 2: SLA Policy --- */
-
-function StepSLA({ sla, updateSla, customCron, setCustomCron }: {
-  sla: SLAForm;
-  updateSla: (field: keyof SLAForm, value: string | number) => void;
-  customCron: boolean;
-  setCustomCron: (v: boolean) => void;
-}) {
-  const { t } = useI18n();
-  const schedulePresets = getSchedulePresets(t);
-
-  return (
-    <div>
-      <h3 style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)", marginBottom: 20 }}>{t("newAsset.slaTitle")}</h3>
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <label style={labelStyle}>
-          {t("newAsset.policyName")}
-          <input className="glass-input" value={sla.name} onChange={(e) => updateSla("name", e.target.value)} placeholder={t("newAsset.policyNamePlaceholder")} />
-        </label>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <label style={labelStyle}>
-            {t("newAsset.copyMode")}
-            <select className="glass-input" value={sla.copy_mode} onChange={(e) => updateSla("copy_mode", e.target.value)}>
-              <option value="common">{t("newAsset.standard")}</option>
-              <option value="aggregate">{t("newAsset.aggregate")}</option>
-            </select>
-          </label>
-          <label style={labelStyle}>
-            {t("newAsset.backupType")}
-            <select className="glass-input" value={sla.backup_type} onChange={(e) => updateSla("backup_type", e.target.value)}>
-              <option value="full">{t("newAsset.full")}</option>
-              <option value="full_incremental">{t("newAsset.incremental")}</option>
-            </select>
-          </label>
-        </div>
-
-        <div>
-          <span style={labelStyle}>{t("newAsset.schedule")}</span>
-          <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-            {schedulePresets.map((p) => (
-              <button
-                key={p.label}
-                className={`btn-pill${!customCron && sla.schedule_cron === p.cron ? " btn-pill-active" : ""}`}
-                onClick={() => {
-                  if (p.cron) {
-                    setCustomCron(false);
-                    updateSla("schedule_cron", p.cron);
-                  } else {
-                    setCustomCron(true);
-                  }
-                }}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-          {customCron && (
-            <input
-              className="glass-input"
-              style={{ marginTop: 8 }}
-              value={sla.schedule_cron}
-              onChange={(e) => updateSla("schedule_cron", e.target.value)}
-              placeholder="0 2 * * *"
-            />
-          )}
-          <p style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 4 }}>
-            {t("newAsset.currentSchedule")}: <code style={{ fontFamily: "'SF Mono', monospace" }}>{sla.schedule_cron}</code>
-          </p>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
-          <label style={labelStyle}>
-            {t("newAsset.blockSize")}
-            <select className="glass-input" value={String(sla.block_size)} onChange={(e) => updateSla("block_size", Number(e.target.value))}>
-              <option value="262144">256 KB</option>
-              <option value="1048576">1 MB</option>
-              <option value="4194304">4 MB</option>
-              <option value="16777216">16 MB</option>
-            </select>
-          </label>
-          <label style={labelStyle}>
-            {t("newAsset.subtasks")}
-            <input className="glass-input" type="number" min={1} max={16} value={sla.subtask_count} onChange={(e) => updateSla("subtask_count", Number(e.target.value))} />
-          </label>
-          <label style={labelStyle}>
-            {t("newAsset.memoryLimit")}
-            <input className="glass-input" type="number" min={128} value={sla.memory_limit_mb} onChange={(e) => updateSla("memory_limit_mb", Number(e.target.value))} />
-          </label>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <label style={labelStyle}>
-            {t("newAsset.retention")}
-            <select className="glass-input" value={sla.retention_kind} onChange={(e) => updateSla("retention_kind", e.target.value)}>
-              <option value="by_count">{t("newAsset.byCount")}</option>
-              <option value="by_days">{t("newAsset.byDays")}</option>
-            </select>
-          </label>
-          <label style={labelStyle}>
-            {t("newAsset.retentionValue")}
-            <input className="glass-input" type="number" min={1} value={sla.retention_value} onChange={(e) => updateSla("retention_value", Number(e.target.value))} />
-          </label>
-        </div>
-      </div>
+      {pathPickerIndex !== null && (
+        <PathPicker
+          initialPath={paths[pathPickerIndex] || "/"}
+          onSelect={(p) => {
+            const next = [...paths];
+            next[pathPickerIndex] = p;
+            setPaths(next);
+            setPathPickerIndex(null);
+          }}
+          onClose={() => setPathPickerIndex(null)}
+        />
+      )}
     </div>
   );
 }

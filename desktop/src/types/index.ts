@@ -29,8 +29,9 @@ export interface AssetResponse {
   id: string;
   name: string;
   kind: string;
-  config: AssetConfig;
-  sla_policy: SLAPolicyResponse;
+  config?: AssetConfig;
+  sla_policy?: SLAPolicyResponse | null;
+  protection_active: boolean;
   enabled: boolean;
   health: string;
   last_backup: string | null;
@@ -49,6 +50,8 @@ export interface SLAPolicyResponse {
   memory_limit_mb: number;
   retention_kind: string;
   retention_value: number;
+  aggregate_config?: { max_blob_size: number; file_threshold: number; shard_count: number } | null;
+  is_builtin: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -58,7 +61,7 @@ export interface JobResponse {
   asset_id: string;
   operation: string;
   status: string;
-  progress: JobProgress | null;
+  progress?: JobProgress | null;
   size_bytes: number | null;
   file_count: number | null;
   error_count: number;

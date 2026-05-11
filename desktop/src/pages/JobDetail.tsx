@@ -34,15 +34,19 @@ export default function JobDetail() {
 
   const load = useCallback(async () => {
     if (!id) return;
-    try {
-      const [j, l] = await Promise.all([getJob(id), getJobLogs(id)]);
-      setJob(j);
-      setLogs(l.lines || []);
-    } catch (e) {
-      pushToast(t("jobDetail.loadFailed") + `: ${e}`, "error");
-    } finally {
-      setLoading(false);
+    const [jobResult, logsResult] = await Promise.allSettled([
+      getJob(id),
+      getJobLogs(id),
+    ]);
+    if (jobResult.status === "fulfilled") {
+      setJob(jobResult.value);
+    } else {
+      pushToast(t("jobDetail.loadFailed") + `: ${jobResult.reason}`, "error");
     }
+    if (logsResult.status === "fulfilled") {
+      setLogs(logsResult.value.lines || []);
+    }
+    setLoading(false);
   }, [id, pushToast, t]);
 
   useEffect(() => { load(); }, [load]);
@@ -95,7 +99,18 @@ export default function JobDetail() {
     );
   }
 
-  if (!job) return <p className="error-msg">{t("jobDetail.jobNotFound")}</p>;
+  if (!job) {
+    return (
+      <div>
+        <div className="page-header">
+          <button className="btn-ghost" onClick={() => navigate("/jobs")}>&larr; {t("jobDetail.back")}</button>
+        </div>
+        <div className="empty-state">
+          <p style={{ color: "var(--status-error)", fontWeight: 600 }}>{t("jobDetail.jobNotFound")}</p>
+        </div>
+      </div>
+    );
+  }
 
   const isActive = job.status === "running" || job.status === "pending";
 

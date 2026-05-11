@@ -3,43 +3,34 @@
 use rusqlite::Connection;
 use crate::db::models::ProtectedAsset;
 
+fn row_to_asset(row: &rusqlite::Row) -> rusqlite::Result<ProtectedAsset> {
+    Ok(ProtectedAsset {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        kind: row.get(2)?,
+        config_json: row.get(3)?,
+        sla_policy_id: row.get(4)?,
+        enabled: row.get::<_, i64>(5)? != 0,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
+    })
+}
+
+const SELECT_COLS: &str = "id, name, kind, config_json, sla_policy_id, enabled, created_at, updated_at";
+
 pub fn list_all(conn: &Connection) -> Result<Vec<ProtectedAsset>, anyhow::Error> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, kind, config_json, sla_policy_id, enabled, created_at, updated_at
-         FROM protected_assets ORDER BY created_at DESC"
+        &format!("SELECT {SELECT_COLS} FROM protected_assets ORDER BY created_at DESC")
     )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(ProtectedAsset {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            kind: row.get(2)?,
-            config_json: row.get(3)?,
-            sla_policy_id: row.get(4)?,
-            enabled: row.get(5)?,
-            created_at: row.get(6)?,
-            updated_at: row.get(7)?,
-        })
-    })?;
+    let rows = stmt.query_map([], row_to_asset)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
 pub fn get_by_id(conn: &Connection, id: &str) -> Result<Option<ProtectedAsset>, anyhow::Error> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, kind, config_json, sla_policy_id, enabled, created_at, updated_at
-         FROM protected_assets WHERE id = ?1"
+        &format!("SELECT {SELECT_COLS} FROM protected_assets WHERE id = ?1")
     )?;
-    let mut rows = stmt.query_map([id], |row| {
-        Ok(ProtectedAsset {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            kind: row.get(2)?,
-            config_json: row.get(3)?,
-            sla_policy_id: row.get(4)?,
-            enabled: row.get(5)?,
-            created_at: row.get(6)?,
-            updated_at: row.get(7)?,
-        })
-    })?;
+    let mut rows = stmt.query_map([id], row_to_asset)?;
     match rows.next() {
         Some(r) => Ok(Some(r?)),
         None => Ok(None),
@@ -73,7 +64,31 @@ pub fn update(conn: &Connection, id: &str, name: &str, config_json: &str, enable
     Ok(())
 }
 
+pub fn update_sla(conn: &Connection, id: &str, sla_policy_id: Option<&str>) -> Result<(), anyhow::Error> {
+    conn.execute(
+        "UPDATE protected_assets SET sla_policy_id = ?2, updated_at = datetime('now') WHERE id = ?1",
+        rusqlite::params![id, sla_policy_id],
+    )?;
+    Ok(())
+}
+
+pub fn set_enabled(conn: &Connection, id: &str, enabled: bool) -> Result<(), anyhow::Error> {
+    conn.execute(
+        "UPDATE protected_assets SET enabled = ?2, updated_at = datetime('now') WHERE id = ?1",
+        rusqlite::params![id, enabled as i32],
+    )?;
+    Ok(())
+}
+
 pub fn delete(conn: &Connection, id: &str) -> Result<(), anyhow::Error> {
     conn.execute("DELETE FROM protected_assets WHERE id = ?1", [id])?;
     Ok(())
+}
+
+pub fn list_by_sla(conn: &Connection, sla_id: &str) -> Result<Vec<ProtectedAsset>, anyhow::Error> {
+    let mut stmt = conn.prepare(
+        &format!("SELECT {SELECT_COLS} FROM protected_assets WHERE sla_policy_id = ?1")
+    )?;
+    let rows = stmt.query_map([sla_id], row_to_asset)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }

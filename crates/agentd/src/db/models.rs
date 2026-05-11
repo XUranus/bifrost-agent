@@ -7,7 +7,7 @@ pub struct ProtectedAsset {
     pub name: String,
     pub kind: String,
     pub config_json: String,
-    pub sla_policy_id: String,
+    pub sla_policy_id: Option<String>,
     pub enabled: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -27,6 +27,7 @@ pub struct SLAPolicy {
     pub retention_kind: String,
     pub retention_value: i64,
     pub aggregate_config_json: Option<String>,
+    pub is_builtin: bool,
     pub created_at: String,
     pub updated_at: String,
 }

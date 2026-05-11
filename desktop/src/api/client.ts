@@ -63,6 +63,14 @@ export async function testAsset(id: string): Promise<unknown> {
   return invoke("test_asset", { id });
 }
 
+export async function activateProtection(id: string, slaPolicyId: string): Promise<unknown> {
+  return invoke("activate_protection", { id, slaPolicyId });
+}
+
+export async function deactivateProtection(id: string): Promise<unknown> {
+  return invoke("deactivate_protection", { id });
+}
+
 // SLA Policies
 export async function listSLAPolicies(): Promise<SLAPolicyResponse[]> {
   return invoke("list_sla_policies");
@@ -111,6 +119,10 @@ export async function cancelJob(id: string): Promise<unknown> {
   return invoke("cancel_job", { id });
 }
 
+export async function deleteJob(id: string): Promise<unknown> {
+  return invoke("delete_job", { id });
+}
+
 export async function getJobLogs(
   id: string
 ): Promise<{ lines: { level: string; message: string; timestamp: string }[] }> {
@@ -136,6 +148,10 @@ export async function browseCopy(copyId: string, path?: string): Promise<DirEntr
   return invoke("browse_copy", { copyId, path: path ?? null });
 }
 
+export async function browseLocal(path?: string): Promise<DirEntry[]> {
+  return invoke("browse_local", { path: path ?? null });
+}
+
 // Agent Profiles
 export interface AgentProfile {
   name: string;
@@ -157,6 +173,15 @@ export async function removeAgentProfile(name: string): Promise<void> {
 
 export async function setActiveAgent(name: string): Promise<void> {
   return invoke("set_active_agent", { name });
+}
+
+// Agent Config
+export async function getAgentConfig(): Promise<{ version: string; copy_storage_dir: string }> {
+  return invoke("get_agent_config");
+}
+
+export async function updateAgentConfig(body: { copy_storage_dir?: string }): Promise<{ version: string; copy_storage_dir: string }> {
+  return invoke("update_agent_config", { body });
 }
 
 // Error parsing

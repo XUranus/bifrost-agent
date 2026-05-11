@@ -5,7 +5,7 @@ use axum::{
 };
 
 use crate::server::router::AppState;
-use super::types::{AgentInfoResponse, HealthResponse};
+use super::types::{AgentInfoResponse, HealthResponse, AgentConfigResponse, UpdateAgentConfigRequest};
 
 /// GET /api/v1/health — unauthenticated health check.
 pub async fn health(
@@ -41,17 +41,37 @@ pub async fn agent_info() -> Json<AgentInfoResponse> {
 }
 
 /// GET /api/v1/agent/config — get agent configuration.
-pub async fn get_config() -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "version": env!("CARGO_PKG_VERSION"),
+pub async fn get_config(
+    State(state): State<AppState>,
+) -> Result<Json<AgentConfigResponse>, (axum::http::StatusCode, String)> {
+    let copy_storage_dir = state.db.with_conn(|conn| crate::db::agent_config::get(conn, "copy_storage_dir"))
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .unwrap_or_else(|| "/var/lib/bifrost-agent/copy_repos".to_string());
+
+    Ok(Json(AgentConfigResponse {
+        version: env!("CARGO_PKG_VERSION").into(),
+        copy_storage_dir,
     }))
 }
 
 /// PUT /api/v1/agent/config — update agent configuration.
 pub async fn update_config(
-    Json(_body): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "status": "ok" }))
+    State(state): State<AppState>,
+    Json(body): Json<UpdateAgentConfigRequest>,
+) -> Result<Json<AgentConfigResponse>, (axum::http::StatusCode, String)> {
+    if let Some(dir) = &body.copy_storage_dir {
+        state.db.with_conn(|conn| crate::db::agent_config::set(conn, "copy_storage_dir", dir))
+            .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    }
+
+    let copy_storage_dir = state.db.with_conn(|conn| crate::db::agent_config::get(conn, "copy_storage_dir"))
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .unwrap_or_else(|| "/var/lib/bifrost-agent/copy_repos".to_string());
+
+    Ok(Json(AgentConfigResponse {
+        version: env!("CARGO_PKG_VERSION").into(),
+        copy_storage_dir,
+    }))
 }
 
 /// Build the routes for /api/v1/agent/*

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { listSLAPolicies, createSLAPolicy, updateSLAPolicy, deleteSLAPolicy } from "../api/client";
 import { useToast } from "../components/Toast";
 import { SkeletonTable } from "../components/Skeleton";
@@ -11,6 +12,33 @@ function getSchedulePresets(t: (k: string) => string) {
     { label: t("sla.daily2am"), cron: "0 2 * * *" },
     { label: t("sla.weeklySunday"), cron: "0 2 * * 0" },
   ];
+}
+
+function friendlyCopyMode(mode: string, t: (k: string) => string): string {
+  if (mode === "common") return t("sla.standard");
+  if (mode === "aggregate") return t("sla.aggregate");
+  return mode;
+}
+
+function friendlyBackupType(type: string, t: (k: string) => string): string {
+  if (type === "full") return t("sla.full");
+  if (type === "full_incremental") return t("sla.incremental");
+  return type;
+}
+
+function friendlySchedule(cron: string, t: (k: string) => string): string {
+  const presets: Record<string, string> = {
+    "0 * * * *": t("sla.everyHour"),
+    "0 2 * * *": t("sla.daily2am"),
+    "0 2 * * 0": t("sla.weeklySunday"),
+  };
+  return presets[cron] || cron;
+}
+
+function friendlyRetention(kind: string, value: number, t: (k: string) => string): string {
+  if (kind === "by_count") return t("sla.retentionByCount").replace("{n}", String(value));
+  if (kind === "by_days") return t("sla.retentionByDays").replace("{n}", String(value));
+  return `${kind}=${value}`;
 }
 
 export default function SLAPolicies() {
@@ -61,19 +89,29 @@ export default function SLAPolicies() {
         <button className="btn-primary" onClick={() => setShowCreate(true)}>{t("sla.newPolicy")}</button>
       </div>
 
-      {showCreate && (
-        <CreatePolicyForm
-          onDone={() => { setShowCreate(false); load(); }}
-          onCancel={() => setShowCreate(false)}
-        />
+      {showCreate && createPortal(
+        <div className="log-overlay" onClick={() => setShowCreate(false)}>
+          <div className="glass-modal" style={{ width: 560, padding: 28, maxHeight: "85vh", overflow: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <CreatePolicyForm
+              onDone={() => { setShowCreate(false); load(); }}
+              onCancel={() => setShowCreate(false)}
+            />
+          </div>
+        </div>,
+        document.body
       )}
 
-      {editPolicyId && (
-        <EditPolicyForm
-          policy={policies.find((p) => p.id === editPolicyId)!}
-          onDone={() => { setEditPolicyId(null); load(); }}
-          onCancel={() => setEditPolicyId(null)}
-        />
+      {editPolicyId && createPortal(
+        <div className="log-overlay" onClick={() => setEditPolicyId(null)}>
+          <div className="glass-modal" style={{ width: 560, padding: 28, maxHeight: "85vh", overflow: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <EditPolicyForm
+              policy={policies.find((p) => p.id === editPolicyId)!}
+              onDone={() => { setEditPolicyId(null); load(); }}
+              onCancel={() => setEditPolicyId(null)}
+            />
+          </div>
+        </div>,
+        document.body
       )}
 
       {policies.length === 0 && !showCreate ? (
@@ -98,25 +136,36 @@ export default function SLAPolicies() {
             <tbody>
               {policies.map((p) => (
                 <tr key={p.id}>
-                  <td style={{ fontWeight: 600 }}>{p.name}</td>
-                  <td>{p.copy_mode}</td>
-                  <td>{p.backup_type}</td>
-                  <td className="td-mono">{p.schedule_cron}</td>
+                  <td style={{ fontWeight: 600 }}>
+                    {p.name}
+                    {p.is_builtin && (
+                      <span style={{ marginLeft: 8, fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "var(--accent-soft)", color: "var(--accent)", fontWeight: 600 }}>
+                        {t("sla.builtin")}
+                      </span>
+                    )}
+                  </td>
+                  <td>{friendlyCopyMode(p.copy_mode, t)}</td>
+                  <td>{friendlyBackupType(p.backup_type, t)}</td>
+                  <td>{friendlySchedule(p.schedule_cron, t)}</td>
                   <td>{p.subtask_count}</td>
-                  <td>{p.retention_kind}={p.retention_value}</td>
+                  <td>{friendlyRetention(p.retention_kind, p.retention_value, t)}</td>
                   <td style={{ display: "flex", gap: 6 }}>
-                    <button
-                      className="btn-secondary btn-sm"
-                      onClick={() => setEditPolicyId(p.id)}
-                    >
-                      {t("sla.edit")}
-                    </button>
-                    <button
-                      className="btn-danger btn-sm"
-                      onClick={() => handleDelete(p.id, p.name)}
-                    >
-                      {t("sla.delete")}
-                    </button>
+                    {!p.is_builtin && (
+                      <>
+                        <button
+                          className="btn-secondary btn-sm"
+                          onClick={() => setEditPolicyId(p.id)}
+                        >
+                          {t("sla.edit")}
+                        </button>
+                        <button
+                          className="btn-danger btn-sm"
+                          onClick={() => handleDelete(p.id, p.name)}
+                        >
+                          {t("sla.delete")}
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -165,10 +214,6 @@ function CreatePolicyForm({ onDone, onCancel }: { onDone: () => void; onCancel: 
   }
 
   async function handleSubmit() {
-    if (!form.name.trim()) {
-      pushToast(t("sla.nameRequired"), "error");
-      return;
-    }
     setSubmitting(true);
     try {
       await createSLAPolicy(form);
@@ -182,29 +227,31 @@ function CreatePolicyForm({ onDone, onCancel }: { onDone: () => void; onCancel: 
   }
 
   return (
-    <div className="glass-panel" style={{ padding: 24, marginBottom: 16 }}>
+    <>
       <h3 style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)", marginBottom: 16 }}>{t("sla.createNew")}</h3>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <label style={labelStyle}>
           {t("sla.policyName")}
-          <input className="glass-input" value={form.name} onChange={(e) => update("name", e.target.value)} placeholder="e.g. Daily Backup" />
+          <input className="glass-input" value={form.name} onChange={(e) => update("name", e.target.value)} placeholder={t("sla.nameOptional")} />
         </label>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          <label style={labelStyle}>
-            {t("sla.copyMode")}
-            <select className="glass-input" value={form.copy_mode} onChange={(e) => update("copy_mode", e.target.value)}>
-              <option value="common">{t("sla.standard")}</option>
-              <option value="aggregate">{t("sla.aggregate")}</option>
-            </select>
-          </label>
-          <label style={labelStyle}>
-            {t("sla.backupType")}
-            <select className="glass-input" value={form.backup_type} onChange={(e) => update("backup_type", e.target.value)}>
-              <option value="full">{t("sla.full")}</option>
-              <option value="full_incremental">{t("sla.incremental")}</option>
-            </select>
-          </label>
+          <div>
+            <span style={labelStyle}>{t("sla.copyMode")}</span>
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              {[{ v: "common", l: t("sla.standard") }, { v: "aggregate", l: t("sla.aggregate") }].map((o) => (
+                <button key={o.v} className={`btn-pill${form.copy_mode === o.v ? " btn-pill-active" : ""}`} onClick={() => update("copy_mode", o.v)}>{o.l}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <span style={labelStyle}>{t("sla.backupType")}</span>
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              {[{ v: "full", l: t("sla.full") }, { v: "full_incremental", l: t("sla.incremental") }].map((o) => (
+                <button key={o.v} className={`btn-pill${form.backup_type === o.v ? " btn-pill-active" : ""}`} onClick={() => update("backup_type", o.v)}>{o.l}</button>
+              ))}
+            </div>
+          </div>
         </div>
 
         <div>
@@ -243,36 +290,37 @@ function CreatePolicyForm({ onDone, onCancel }: { onDone: () => void; onCancel: 
           </label>
           <label style={labelStyle}>
             {t("sla.subtasks")}
-            <input className="glass-input" type="number" min={1} max={16} value={form.subtask_count} onChange={(e) => update("subtask_count", Number(e.target.value))} />
+            <input className="glass-input" type="number" min={1} max={32} value={form.subtask_count} onChange={(e) => update("subtask_count", Number(e.target.value))} />
           </label>
           <label style={labelStyle}>
             {t("sla.memoryMb")}
-            <input className="glass-input" type="number" min={128} value={form.memory_limit_mb} onChange={(e) => update("memory_limit_mb", Number(e.target.value))} />
+            <input className="glass-input" type="number" min={128} max={8192} value={form.memory_limit_mb} onChange={(e) => update("memory_limit_mb", Number(e.target.value))} />
           </label>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          <label style={labelStyle}>
-            {t("sla.retention")}
-            <select className="glass-input" value={form.retention_kind} onChange={(e) => update("retention_kind", e.target.value)}>
-              <option value="by_count">{t("sla.byCount")}</option>
-              <option value="by_days">{t("sla.byDays")}</option>
-            </select>
-          </label>
+          <div>
+            <span style={labelStyle}>{t("sla.retention")}</span>
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              {[{ v: "by_count", l: t("sla.byCount") }, { v: "by_days", l: t("sla.byDays") }].map((o) => (
+                <button key={o.v} className={`btn-pill${form.retention_kind === o.v ? " btn-pill-active" : ""}`} onClick={() => update("retention_kind", o.v)}>{o.l}</button>
+              ))}
+            </div>
+          </div>
           <label style={labelStyle}>
             {t("sla.retentionValue")}
             <input className="glass-input" type="number" min={1} value={form.retention_value} onChange={(e) => update("retention_value", Number(e.target.value))} />
           </label>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8, paddingTop: 16, borderTop: "1px solid var(--glass-border-subtle)" }}>
           <button className="btn-secondary" onClick={onCancel}>{t("common.cancel")}</button>
           <button className="btn-primary" onClick={handleSubmit} disabled={submitting}>
             {submitting ? t("sla.creating") : t("sla.createPolicy")}
           </button>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -319,7 +367,7 @@ function EditPolicyForm({ policy, onDone, onCancel }: { policy: SLAPolicyRespons
   }
 
   return (
-    <div className="glass-panel" style={{ padding: 24, marginBottom: 16 }}>
+    <>
       <h3 style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)", marginBottom: 16 }}>{t("sla.editPolicy")}</h3>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <label style={labelStyle}>
@@ -328,20 +376,22 @@ function EditPolicyForm({ policy, onDone, onCancel }: { policy: SLAPolicyRespons
         </label>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          <label style={labelStyle}>
-            {t("sla.copyMode")}
-            <select className="glass-input" value={form.copy_mode} onChange={(e) => update("copy_mode", e.target.value)}>
-              <option value="common">{t("sla.standard")}</option>
-              <option value="aggregate">{t("sla.aggregate")}</option>
-            </select>
-          </label>
-          <label style={labelStyle}>
-            {t("sla.backupType")}
-            <select className="glass-input" value={form.backup_type} onChange={(e) => update("backup_type", e.target.value)}>
-              <option value="full">{t("sla.full")}</option>
-              <option value="full_incremental">{t("sla.incremental")}</option>
-            </select>
-          </label>
+          <div>
+            <span style={labelStyle}>{t("sla.copyMode")}</span>
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              {[{ v: "common", l: t("sla.standard") }, { v: "aggregate", l: t("sla.aggregate") }].map((o) => (
+                <button key={o.v} className={`btn-pill${form.copy_mode === o.v ? " btn-pill-active" : ""}`} onClick={() => update("copy_mode", o.v)}>{o.l}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <span style={labelStyle}>{t("sla.backupType")}</span>
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              {[{ v: "full", l: t("sla.full") }, { v: "full_incremental", l: t("sla.incremental") }].map((o) => (
+                <button key={o.v} className={`btn-pill${form.backup_type === o.v ? " btn-pill-active" : ""}`} onClick={() => update("backup_type", o.v)}>{o.l}</button>
+              ))}
+            </div>
+          </div>
         </div>
 
         <div>
@@ -380,36 +430,37 @@ function EditPolicyForm({ policy, onDone, onCancel }: { policy: SLAPolicyRespons
           </label>
           <label style={labelStyle}>
             {t("sla.subtasks")}
-            <input className="glass-input" type="number" min={1} max={16} value={form.subtask_count} onChange={(e) => update("subtask_count", Number(e.target.value))} />
+            <input className="glass-input" type="number" min={1} max={32} value={form.subtask_count} onChange={(e) => update("subtask_count", Number(e.target.value))} />
           </label>
           <label style={labelStyle}>
             {t("sla.memoryMb")}
-            <input className="glass-input" type="number" min={128} value={form.memory_limit_mb} onChange={(e) => update("memory_limit_mb", Number(e.target.value))} />
+            <input className="glass-input" type="number" min={128} max={8192} value={form.memory_limit_mb} onChange={(e) => update("memory_limit_mb", Number(e.target.value))} />
           </label>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          <label style={labelStyle}>
-            {t("sla.retention")}
-            <select className="glass-input" value={form.retention_kind} onChange={(e) => update("retention_kind", e.target.value)}>
-              <option value="by_count">{t("sla.byCount")}</option>
-              <option value="by_days">{t("sla.byDays")}</option>
-            </select>
-          </label>
+          <div>
+            <span style={labelStyle}>{t("sla.retention")}</span>
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              {[{ v: "by_count", l: t("sla.byCount") }, { v: "by_days", l: t("sla.byDays") }].map((o) => (
+                <button key={o.v} className={`btn-pill${form.retention_kind === o.v ? " btn-pill-active" : ""}`} onClick={() => update("retention_kind", o.v)}>{o.l}</button>
+              ))}
+            </div>
+          </div>
           <label style={labelStyle}>
             {t("sla.retentionValue")}
             <input className="glass-input" type="number" min={1} value={form.retention_value} onChange={(e) => update("retention_value", Number(e.target.value))} />
           </label>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8, paddingTop: 16, borderTop: "1px solid var(--glass-border-subtle)" }}>
           <button className="btn-secondary" onClick={onCancel}>{t("common.cancel")}</button>
           <button className="btn-primary" onClick={handleSubmit} disabled={submitting}>
             {submitting ? t("sla.saving") : t("sla.saveChanges")}
           </button>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 

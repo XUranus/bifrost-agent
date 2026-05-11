@@ -5,6 +5,7 @@ use crate::config::AgentConfig;
 
 mod migrations;
 pub mod models;
+pub mod agent_config;
 pub mod assets;
 pub mod slas;
 pub mod jobs;
@@ -35,6 +36,7 @@ impl Database {
         };
 
         db.run_migrations()?;
+        db.seed_defaults()?;
         Ok(db)
     }
 
@@ -49,5 +51,15 @@ impl Database {
 
     fn run_migrations(&self) -> Result<(), anyhow::Error> {
         self.with_conn(|conn| migrations::run(conn))
+    }
+
+    fn seed_defaults(&self) -> Result<(), anyhow::Error> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT OR IGNORE INTO agent_config (key, value) VALUES ('copy_storage_dir', '/var/lib/bifrost-agent/copy_repos')",
+                [],
+            )?;
+            Ok(())
+        })
     }
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { getJobLogs } from "../api/client";
 import { useJobLogEvents, useAgentEvents } from "../hooks/useAgentEvents";
 import { useI18n } from "../i18n";
@@ -77,7 +78,7 @@ export default function LogViewer({ jobId, onClose }: Props) {
     }
   }, [lines]);
 
-  return (
+  return createPortal(
     <div className="log-overlay">
       <div className="glass-modal log-panel">
         <div className="log-header">
@@ -109,7 +110,8 @@ export default function LogViewer({ jobId, onClose }: Props) {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

@@ -138,7 +138,7 @@ pub async fn create_asset(
 pub async fn get_asset(
     state: State<'_, AppState>,
     id: String,
-) -> Result<serde_json::Value, String> {
+) -> Result<AssetResponse, String> {
     let client = get_client(&state)?;
     client.get(&format!("/api/v1/assets/{id}")).await.map_err(|e| e.to_string())
 }
@@ -174,10 +174,34 @@ pub async fn test_asset(
         .await.map_err(|e| e.to_string())
 }
 
+// --- Protection ---
+
+#[tauri::command]
+pub async fn activate_protection(
+    state: State<'_, AppState>,
+    id: String,
+    sla_policy_id: String,
+) -> Result<serde_json::Value, String> {
+    let client = get_client(&state)?;
+    client.post(&format!("/api/v1/assets/{id}/activate"), &serde_json::json!({
+        "sla_policy_id": sla_policy_id,
+    })).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn deactivate_protection(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<serde_json::Value, String> {
+    let client = get_client(&state)?;
+    client.post(&format!("/api/v1/assets/{id}/deactivate"), &serde_json::json!({}))
+        .await.map_err(|e| e.to_string())
+}
+
 // --- SLA Policies ---
 
 #[tauri::command]
-pub async fn list_sla_policies(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+pub async fn list_sla_policies(state: State<'_, AppState>) -> Result<Vec<SLAPolicyResponse>, String> {
     let client = get_client(&state)?;
     client.get("/api/v1/sla-policies").await.map_err(|e| e.to_string())
 }
@@ -195,7 +219,7 @@ pub async fn create_sla_policy(
 pub async fn get_sla_policy(
     state: State<'_, AppState>,
     id: String,
-) -> Result<serde_json::Value, String> {
+) -> Result<SLAPolicyResponse, String> {
     let client = get_client(&state)?;
     client.get(&format!("/api/v1/sla-policies/{id}")).await.map_err(|e| e.to_string())
 }
@@ -271,6 +295,15 @@ pub async fn cancel_job(
 }
 
 #[tauri::command]
+pub async fn delete_job(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<serde_json::Value, String> {
+    let client = get_client(&state)?;
+    client.delete(&format!("/api/v1/jobs/{id}")).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn get_job_logs(
     state: State<'_, AppState>,
     id: String,
@@ -318,6 +351,23 @@ pub async fn get_settings(state: State<'_, AppState>) -> Result<Settings, String
     Ok(state.settings.lock().unwrap().clone())
 }
 
+// --- Agent Config ---
+
+#[tauri::command]
+pub async fn get_agent_config(state: State<'_, AppState>) -> Result<AgentConfigResponse, String> {
+    let client = get_client(&state)?;
+    client.get("/api/v1/agent/config").await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn update_agent_config(
+    state: State<'_, AppState>,
+    body: serde_json::Value,
+) -> Result<AgentConfigResponse, String> {
+    let client = get_client(&state)?;
+    client.put("/api/v1/agent/config", &body).await.map_err(|e| e.to_string())
+}
+
 // --- Browse ---
 
 #[tauri::command]
@@ -332,6 +382,43 @@ pub async fn browse_copy(
         None => format!("/api/v1/browse/{copy_id}"),
     };
     client.get(&url).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn browse_local(path: Option<String>) -> Result<Vec<DirEntry>, String> {
+    let dir = path.unwrap_or_else(|| "/".to_string());
+    let mut entries = Vec::new();
+    let read_dir = std::fs::read_dir(&dir).map_err(|e| format!("Cannot read directory '{dir}': {e}"))?;
+    for entry in read_dir {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let metadata = entry.metadata().map_err(|e| e.to_string())?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        let full_path = entry.path().to_string_lossy().to_string();
+        let kind = if metadata.is_dir() { "dir".to_string() } else { "file".to_string() };
+        let modified = metadata.modified()
+            .map(|t| {
+                let duration = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                duration.as_secs().to_string()
+            })
+            .unwrap_or_default();
+        entries.push(DirEntry {
+            name,
+            path: full_path,
+            kind,
+            size: metadata.len(),
+            modified,
+            mode: 0,
+        });
+    }
+    entries.sort_by(|a, b| {
+        // Directories first, then alphabetical
+        match (a.kind.as_str(), b.kind.as_str()) {
+            ("dir", "file") => std::cmp::Ordering::Less,
+            ("file", "dir") => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        }
+    });
+    Ok(entries)
 }
 
 // --- WebSocket Event Stream ---

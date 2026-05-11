@@ -34,6 +34,9 @@ export default function AssetsPage({ healthMap }: Props) {
   useEffect(() => { load(); }, []);
 
   async function handleBackup(assetId: string) {
+    const asset = assets.find((a) => a.id === assetId);
+    const name = asset?.name || assetId.slice(0, 8);
+    if (!confirm(t("assets.confirmBackup", { name }))) return;
     try {
       await startJob(assetId, "backup");
       pushToast(t("assetDetail.backupStarted"), "success");
@@ -71,7 +74,7 @@ export default function AssetsPage({ healthMap }: Props) {
     for (const id of selected) {
       const a = assets.find((x) => x.id === id);
       if (!a) continue;
-      try { await updateAsset(id, { name: a.name, config_json: JSON.stringify(a.config), enabled: false }); ok++; } catch { /* skip */ }
+      try { await updateAsset(id, { name: a.name, config_json: JSON.stringify(a.config || {}), enabled: false }); ok++; } catch { /* skip */ }
     }
     pushToast(`Disabled ${ok}/${selected.size} assets`, "success");
     setSelected(new Set());
@@ -164,7 +167,7 @@ export default function AssetsPage({ healthMap }: Props) {
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13, color: "var(--text-secondary)", marginBottom: 12 }}>
                   <span>{t("assets.health")}: <strong style={{ color: health === "ok" ? "var(--status-ok)" : "var(--status-error)" }}>{health}</strong></span>
-                  <span>{t("assets.sla")}: {asset.sla_policy.name}</span>
+                  <span>{t("assets.sla")}: {asset.sla_policy?.name ?? "-"}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 12, borderTop: "1px solid var(--glass-border-subtle)" }}>
                   <button

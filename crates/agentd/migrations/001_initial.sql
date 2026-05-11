@@ -3,20 +3,9 @@ BEGIN;
 
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
 
-CREATE TABLE protected_assets (
-    id              TEXT PRIMARY KEY,
-    name            TEXT NOT NULL,
-    kind            TEXT NOT NULL CHECK(kind IN ('fileset', 'volume', 'nas_share')),
-    config_json     TEXT NOT NULL,
-    sla_policy_id   TEXT NOT NULL,
-    enabled         INTEGER NOT NULL DEFAULT 1,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
 CREATE TABLE sla_policies (
     id              TEXT PRIMARY KEY,
-    name            TEXT NOT NULL,
+    name            TEXT NOT NULL UNIQUE,
     copy_mode       TEXT NOT NULL CHECK(copy_mode IN ('common', 'aggregate')),
     backup_type     TEXT NOT NULL CHECK(backup_type IN ('full', 'full_incremental')),
     schedule_cron   TEXT NOT NULL,
@@ -26,6 +15,18 @@ CREATE TABLE sla_policies (
     retention_kind  TEXT NOT NULL CHECK(retention_kind IN ('by_count', 'by_age_days', 'by_storage_gb')),
     retention_value INTEGER NOT NULL,
     aggregate_config_json TEXT,
+    is_builtin      INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE protected_assets (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    kind            TEXT NOT NULL CHECK(kind IN ('fileset', 'volume', 'nas_share')),
+    config_json     TEXT NOT NULL,
+    sla_policy_id   TEXT REFERENCES sla_policies(id),
+    enabled         INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -71,10 +72,13 @@ CREATE TABLE credentials (
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE agent_config (
+CREATE TABLE IF NOT EXISTS agent_config (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- Seed default config values
+INSERT OR IGNORE INTO agent_config (key, value) VALUES ('copy_storage_dir', '/var/lib/bifrost-agent/copy_repos');
 
 CREATE TABLE retention_log (
     id        TEXT PRIMARY KEY,
@@ -89,5 +93,12 @@ CREATE INDEX IF NOT EXISTS idx_backup_copies_parent ON backup_copies(parent_copy
 CREATE INDEX IF NOT EXISTS idx_job_executions_asset ON job_executions(asset_id, status);
 CREATE INDEX IF NOT EXISTS idx_job_executions_status ON job_executions(status);
 CREATE INDEX IF NOT EXISTS idx_credentials_asset ON credentials(asset_id);
+
+-- Seed built-in SLA policies
+INSERT OR IGNORE INTO sla_policies (id, name, copy_mode, backup_type, schedule_cron, block_size, subtask_count, memory_limit_mb, retention_kind, retention_value, is_builtin)
+VALUES
+    ('builtin-hourly', 'Hourly Backup', 'common', 'full_incremental', '0 * * * *', 1048576, 4, 512, 'by_count', 24, 1),
+    ('builtin-daily', 'Daily Backup', 'common', 'full', '0 2 * * *', 1048576, 4, 512, 'by_count', 7, 1),
+    ('builtin-weekly', 'Weekly Backup', 'common', 'full', '0 2 * * 0', 1048576, 4, 512, 'by_count', 4, 1);
 
 COMMIT;

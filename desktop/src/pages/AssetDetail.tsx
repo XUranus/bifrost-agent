@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   getAsset,
@@ -9,11 +10,41 @@ import {
   deleteBackupCopy,
   browseCopy,
   startRestore,
+  listSLAPolicies,
+  activateProtection,
+  deactivateProtection,
 } from "../api/client";
 import { useToast } from "../components/Toast";
 import { Skeleton, SkeletonPanel, SkeletonTable } from "../components/Skeleton";
 import { useI18n } from "../i18n";
-import type { AssetResponse, BackupCopyResponse, DirEntry } from "../types";
+import type { AssetResponse, BackupCopyResponse, DirEntry, SLAPolicyResponse } from "../types";
+
+function friendlyCopyMode(mode: string, t: (k: string) => string): string {
+  if (mode === "common") return t("sla.standard");
+  if (mode === "aggregate") return t("sla.aggregate");
+  return mode;
+}
+
+function friendlyBackupType(type: string, t: (k: string) => string): string {
+  if (type === "full") return t("sla.full");
+  if (type === "full_incremental") return t("sla.incremental");
+  return type;
+}
+
+function friendlySchedule(cron: string, t: (k: string) => string): string {
+  const presets: Record<string, string> = {
+    "0 * * * *": t("sla.everyHour"),
+    "0 2 * * *": t("sla.daily2am"),
+    "0 2 * * 0": t("sla.weeklySunday"),
+  };
+  return presets[cron] || cron;
+}
+
+function friendlyRetention(kind: string, value: number, t: (k: string) => string): string {
+  if (kind === "by_count") return t("sla.retentionByCount").replace("{n}", String(value));
+  if (kind === "by_days") return t("sla.retentionByDays").replace("{n}", String(value));
+  return `${kind}=${value}`;
+}
 
 export default function AssetDetail() {
   const { id } = useParams<{ id: string }>();
@@ -30,18 +61,27 @@ export default function AssetDetail() {
   const [browsePath, setBrowsePath] = useState<string>("");
   const [testing, setTesting] = useState(false);
   const [restoreCopyId, setRestoreCopyId] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteCopyId, setDeleteCopyId] = useState<string | null>(null);
+  const [showActivateModal, setShowActivateModal] = useState(false);
+  const [allPolicies, setAllPolicies] = useState<SLAPolicyResponse[]>([]);
+  const [selectedSlaId, setSelectedSlaId] = useState<string>("");
 
   async function load() {
     if (!id) return;
-    try {
-      const [a, c] = await Promise.all([getAsset(id), listBackupCopies(id)]);
-      setAsset(a);
-      setCopies(c);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
+    const [assetResult, copiesResult] = await Promise.allSettled([
+      getAsset(id),
+      listBackupCopies(id),
+    ]);
+    if (assetResult.status === "fulfilled") {
+      setAsset(assetResult.value);
+    } else {
+      setError(String(assetResult.reason));
     }
+    if (copiesResult.status === "fulfilled") {
+      setCopies(copiesResult.value);
+    }
+    setLoading(false);
   }
 
   useEffect(() => { load(); }, [id]);
@@ -59,7 +99,12 @@ export default function AssetDetail() {
 
   async function handleDelete() {
     if (!id) return;
-    if (!confirm(t("assetDetail.confirmDeleteAsset"))) return;
+    setShowDeleteConfirm(true);
+  }
+
+  async function confirmDelete() {
+    if (!id) return;
+    setShowDeleteConfirm(false);
     try {
       await deleteAsset(id);
       pushToast(t("assetDetail.assetDeleted"), "success");
@@ -82,8 +127,48 @@ export default function AssetDetail() {
     }
   }
 
+  async function openActivateModal() {
+    try {
+      const policies = await listSLAPolicies();
+      setAllPolicies(Array.isArray(policies) ? policies : []);
+      if (policies.length > 0) setSelectedSlaId(policies[0].id);
+      setShowActivateModal(true);
+    } catch (e) {
+      pushToast("Failed to load SLA policies", "error");
+    }
+  }
+
+  async function handleActivate() {
+    if (!id || !selectedSlaId) return;
+    try {
+      await activateProtection(id, selectedSlaId);
+      pushToast(t("assetDetail.activated"), "success");
+      setShowActivateModal(false);
+      load();
+    } catch (e) {
+      pushToast(`${e}`, "error");
+    }
+  }
+
+  async function handleDeactivate() {
+    if (!id) return;
+    try {
+      await deactivateProtection(id);
+      pushToast(t("assetDetail.deactivated"), "success");
+      load();
+    } catch (e) {
+      pushToast(`${e}`, "error");
+    }
+  }
+
   async function handleDeleteCopy(copyId: string) {
-    if (!confirm(t("assetDetail.confirmDeleteCopy"))) return;
+    setDeleteCopyId(copyId);
+  }
+
+  async function confirmDeleteCopy() {
+    const copyId = deleteCopyId;
+    if (!copyId) return;
+    setDeleteCopyId(null);
     try {
       await deleteBackupCopy(copyId);
       pushToast(t("assetDetail.copyDeleted"), "success");
@@ -151,7 +236,19 @@ export default function AssetDetail() {
       </div>
     );
   }
-  if (!asset) return <p className="error-msg">{t("assetDetail.assetNotFound")}</p>;
+  if (!asset) {
+    return (
+      <div>
+        <div className="page-header">
+          <button className="btn-ghost" onClick={() => navigate("/assets")}>&larr; {t("common.back")}</button>
+        </div>
+        <div className="empty-state">
+          <p style={{ color: "var(--status-error)", fontWeight: 600 }}>{t("assetDetail.assetNotFound")}</p>
+          {error && <p style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 8 }}>{error}</p>}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -180,22 +277,38 @@ export default function AssetDetail() {
               <dt>{t("assetDetail.lastBackup")}</dt><dd>{asset.last_backup ? new Date(asset.last_backup).toLocaleString() : t("assetDetail.never")}</dd>
               <dt>{t("assetDetail.nextBackup")}</dt><dd>{asset.next_backup ? new Date(asset.next_backup).toLocaleString() : t("assetDetail.notScheduled")}</dd>
               <dt>{t("assetDetail.created")}</dt><dd>{new Date(asset.created_at).toLocaleString()}</dd>
-              <dt>{t("assetDetail.config")}</dt><dd className="code">{JSON.stringify(asset.config, null, 2)}</dd>
+              <dt>{t("assetDetail.config")}</dt><dd>{renderConfig(asset.config, t)}</dd>
             </dl>
           </div>
         </div>
 
         <div className="glass-panel">
-          <div className="panel-header"><h3>{t("assetDetail.slaPolicy")}: {asset.sla_policy.name}</h3></div>
+          <div className="panel-header">
+            <h3>{t("assetDetail.slaPolicy")}: {asset.sla_policy?.name ?? "-"}</h3>
+            {asset.protection_active ? (
+              <button className="btn-danger btn-sm" onClick={handleDeactivate}>{t("assetDetail.deactivateProtection")}</button>
+            ) : (
+              <button className="btn-primary btn-sm" onClick={openActivateModal}>{t("assetDetail.activateProtection")}</button>
+            )}
+          </div>
           <div className="panel-body">
-            <dl className="detail-list">
-              <dt>{t("assetDetail.copyMode")}</dt><dd>{asset.sla_policy.copy_mode}</dd>
-              <dt>{t("assetDetail.backupType")}</dt><dd>{asset.sla_policy.backup_type}</dd>
-              <dt>{t("assetDetail.schedule")}</dt><dd>{asset.sla_policy.schedule_cron}</dd>
-              <dt>{t("assetDetail.blockSize")}</dt><dd>{formatBytes(asset.sla_policy.block_size)}</dd>
-              <dt>{t("assetDetail.subtasks")}</dt><dd>{String(asset.sla_policy.subtask_count)}</dd>
-              <dt>{t("assetDetail.retention")}</dt><dd>{`${asset.sla_policy.retention_kind}=${asset.sla_policy.retention_value}`}</dd>
-            </dl>
+            {!asset.protection_active && (
+              <div style={{ padding: "12px 16px", marginBottom: 12, borderRadius: 8, background: "rgba(255, 160, 0, 0.1)", border: "1px solid rgba(255, 160, 0, 0.3)", fontSize: 13, color: "var(--text-secondary)" }}>
+                {t("assetDetail.protectionInactive")}
+              </div>
+            )}
+            {asset.sla_policy ? (
+              <dl className="detail-list">
+                <dt>{t("assetDetail.copyMode")}</dt><dd>{friendlyCopyMode(asset.sla_policy.copy_mode, t)}</dd>
+                <dt>{t("assetDetail.backupType")}</dt><dd>{friendlyBackupType(asset.sla_policy.backup_type, t)}</dd>
+                <dt>{t("assetDetail.schedule")}</dt><dd>{friendlySchedule(asset.sla_policy.schedule_cron, t)}</dd>
+                <dt>{t("assetDetail.blockSize")}</dt><dd>{formatBytes(asset.sla_policy.block_size)}</dd>
+                <dt>{t("assetDetail.subtasks")}</dt><dd>{String(asset.sla_policy.subtask_count)}</dd>
+                <dt>{t("assetDetail.retention")}</dt><dd>{asset.sla_policy.retention_kind && asset.sla_policy.retention_value ? friendlyRetention(asset.sla_policy.retention_kind, asset.sla_policy.retention_value, t) : t("assetDetail.unlimited")}</dd>
+              </dl>
+            ) : (
+              <p className="empty-state">{t("assetDetail.noSlaPolicy")}</p>
+            )}
           </div>
         </div>
       </div>
@@ -297,18 +410,75 @@ export default function AssetDetail() {
       </div>
 
       <div style={{ display: "flex", gap: 12, paddingTop: 16 }}>
-        <button className="btn-primary btn-lg" onClick={handleBackup}>{t("assetDetail.backupNow")}</button>
+        <button className="btn-primary btn-lg" onClick={handleBackup} disabled={!asset.protection_active} title={!asset.protection_active ? t("assetDetail.protectionRequired") : undefined}>
+          {t("assetDetail.backupNow")}
+        </button>
         <button className="btn-danger" onClick={handleDelete}>{t("assetDetail.deleteAsset")}</button>
       </div>
 
-      {restoreCopyId && (
+      {restoreCopyId && createPortal(
         <RestoreModal
           copyId={restoreCopyId}
           defaultSourcePath={browseCopyId === restoreCopyId && browsePath ? browsePath : "/"}
           onConfirm={handleRestoreConfirm}
           onCancel={() => setRestoreCopyId(null)}
           restoring={restoreCopyId !== null}
-        />
+        />,
+        document.body
+      )}
+
+      {showDeleteConfirm && createPortal(
+        <ConfirmDialog
+          title={t("assetDetail.deleteAsset")}
+          message={t("assetDetail.confirmDeleteAsset")}
+          confirmLabel={t("common.delete")}
+          danger
+          onConfirm={confirmDelete}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />,
+        document.body
+      )}
+
+      {deleteCopyId && createPortal(
+        <ConfirmDialog
+          title={t("assetDetail.confirmDeleteCopy")}
+          message={t("assetDetail.confirmDeleteCopy")}
+          confirmLabel={t("common.delete")}
+          danger
+          onConfirm={confirmDeleteCopy}
+          onCancel={() => setDeleteCopyId(null)}
+        />,
+        document.body
+      )}
+
+      {showActivateModal && createPortal(
+        <div className="log-overlay" onClick={() => setShowActivateModal(false)}>
+          <div className="glass-modal" style={{ width: 440, padding: 28 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)", marginBottom: 16 }}>
+              {t("assetDetail.activateProtection")}
+            </h3>
+            <label style={labelStyle}>
+              {t("assetDetail.selectSla")}
+              <select className="glass-input" value={selectedSlaId} onChange={(e) => setSelectedSlaId(e.target.value)}>
+                {allPolicies.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}{p.is_builtin ? ` (${t("sla.builtin")})` : ""}</option>
+                ))}
+              </select>
+            </label>
+            {allPolicies.length === 0 && (
+              <p style={{ fontSize: 13, color: "var(--text-tertiary)", marginTop: 8 }}>
+                {t("sla.noPolicies")}
+              </p>
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 24 }}>
+              <button className="btn-secondary" onClick={() => setShowActivateModal(false)}>{t("common.cancel")}</button>
+              <button className="btn-primary" onClick={handleActivate} disabled={!selectedSlaId}>
+                {t("assetDetail.activateProtection")}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -404,10 +574,87 @@ function RestoreModal({ copyId, defaultSourcePath, onConfirm, onCancel, restorin
   );
 }
 
+/* --- Confirm Dialog --- */
+
+interface ConfirmDialogProps {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  danger?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+function ConfirmDialog({ title, message, confirmLabel, danger, onConfirm, onCancel }: ConfirmDialogProps) {
+  const { t } = useI18n();
+  return (
+    <div className="log-overlay" onClick={onCancel}>
+      <div className="glass-modal" style={{ width: 400, padding: 28 }} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)", marginBottom: 12 }}>{title}</h3>
+        <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 24, lineHeight: 1.5 }}>{message}</p>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <button className="btn-secondary" onClick={onCancel}>{t("common.cancel")}</button>
+          <button className={danger ? "btn-danger" : "btn-primary"} onClick={onConfirm}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function renderConfig(config: AssetResponse["config"], t: (key: string) => string): React.ReactNode {
+  if (!config) return "-";
+  switch (config.type) {
+    case "Fileset":
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <ConfigRow label={t("assetDetail.configType")} value="Fileset" />
+          <ConfigRow label={t("assetDetail.configPaths")} value={config.paths?.join(", ") || "-"} mono />
+          {config.consistency_mode != null && <ConfigRow label={t("assetDetail.configConsistency")} value={config.consistency_mode ? t("assetDetail.yes") : t("assetDetail.no")} />}
+          {config.exclude_patterns && config.exclude_patterns.length > 0 && <ConfigRow label={t("assetDetail.configExclude")} value={config.exclude_patterns.join(", ")} mono />}
+        </div>
+      );
+    case "Volume":
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <ConfigRow label={t("assetDetail.configType")} value="Volume" />
+          <ConfigRow label={t("assetDetail.configBackend")} value={config.backend || "-"} />
+          <ConfigRow label={t("assetDetail.configVolumeId")} value={config.volume_id || "-"} mono />
+        </div>
+      );
+    case "NasShare":
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <ConfigRow label={t("assetDetail.configType")} value="NAS Share" />
+          <ConfigRow label={t("assetDetail.configUrl")} value={config.url || "-"} mono />
+        </div>
+      );
+    default:
+      return JSON.stringify(config);
+  }
+}
+
+function ConfigRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div style={{ display: "flex", gap: 8, fontSize: 13 }}>
+      <span style={{ color: "var(--text-tertiary)", minWidth: 80, flexShrink: 0 }}>{label}</span>
+      <span style={{ color: "var(--text-primary)", fontFamily: mono ? "'SF Mono', monospace" : undefined, wordBreak: "break-all" }}>{value}</span>
+    </div>
+  );
+}
+
 function formatBytes(bytes: number): string {
-  if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GiB`;
-  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MiB`;
-  if (bytes >= 1_024) return `${(bytes / 1_024).toFixed(1)} KiB`;
+  if (bytes >= 1_073_741_824) {
+    const val = bytes / 1_073_741_824;
+    return Number.isInteger(val) ? `${val} GiB` : `${val.toFixed(1)} GiB`;
+  }
+  if (bytes >= 1_048_576) {
+    const val = bytes / 1_048_576;
+    return Number.isInteger(val) ? `${val} MiB` : `${val.toFixed(1)} MiB`;
+  }
+  if (bytes >= 1_024) {
+    const val = bytes / 1_024;
+    return Number.isInteger(val) ? `${val} KiB` : `${val.toFixed(1)} KiB`;
+  }
   return `${bytes} B`;
 }
 

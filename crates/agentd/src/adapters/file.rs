@@ -158,8 +158,10 @@ impl FileBackupAdapter {
     }
 
     fn copy_repo_dir(&self) -> PathBuf {
-        // Read from DB config or use default
-        PathBuf::from("/var/lib/bifrost-agent/copy_repos")
+        let dir = self._db.with_conn(|conn| crate::db::agent_config::get(conn, "copy_storage_dir"))
+            .unwrap_or(None)
+            .unwrap_or_else(|| "/var/lib/bifrost-agent/copy_repos".to_string());
+        PathBuf::from(dir)
     }
 
     /// Run a file restore job to a remote destination (NAS, SMB, NFS).

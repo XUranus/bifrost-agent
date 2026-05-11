@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { listAssets, listJobs } from "../api/client";
 import { useI18n } from "../i18n";
@@ -132,7 +133,7 @@ export default function CommandPalette({ open, onClose }: Props) {
     grouped[grouped.length - 1].items.push(r);
   }
 
-  return (
+  return createPortal(
     <div className="cmd-overlay" onClick={onClose}>
       <div className="cmd-palette" onClick={(e) => e.stopPropagation()}>
         <input
@@ -173,6 +174,7 @@ export default function CommandPalette({ open, onClose }: Props) {
           <span>Esc {t("cmd.close")}</span>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

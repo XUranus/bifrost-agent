@@ -53,7 +53,6 @@ pub struct CreateAssetRequest {
     pub name: String,
     pub kind: AssetKind,
     pub config: AssetConfig,
-    pub sla_policy: CreateSLAPolicyRequest,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -62,7 +61,8 @@ pub struct AssetResponse {
     pub name: String,
     pub kind: String,
     pub config: AssetConfig,
-    pub sla_policy: SLAPolicyResponse,
+    pub sla_policy: Option<SLAPolicyResponse>,
+    pub protection_active: bool,
     pub enabled: bool,
     pub health: String,
     pub last_backup: Option<String>,
@@ -70,11 +70,16 @@ pub struct AssetResponse {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ActivateProtectionRequest {
+    pub sla_policy_id: String,
+}
+
 // --- SLA Policy ---
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateSLAPolicyRequest {
-    pub name: String,
+    pub name: Option<String>,
     pub copy_mode: String,
     pub backup_type: String,
     pub schedule_cron: String,
@@ -126,6 +131,7 @@ pub struct SLAPolicyResponse {
     pub retention_kind: String,
     pub retention_value: i64,
     pub aggregate_config: Option<AggregateConfigJson>,
+    pub is_builtin: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -309,4 +315,17 @@ pub struct HealthResponse {
     pub uptime_seconds: u64,
     pub db_ok: bool,
     pub queue_depth: usize,
+}
+
+// --- Agent Config ---
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AgentConfigResponse {
+    pub version: String,
+    pub copy_storage_dir: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateAgentConfigRequest {
+    pub copy_storage_dir: Option<String>,
 }

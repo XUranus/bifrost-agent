@@ -98,6 +98,6 @@ async fn expire_copy(
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_copies))
-        .route("/{id}", get(get_copy).delete(delete_copy))
-        .route("/{id}/expire", post(expire_copy))
+        .route("/:id", get(get_copy).delete(delete_copy))
+        .route("/:id/expire", post(expire_copy))
 }

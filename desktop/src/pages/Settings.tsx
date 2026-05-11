@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
-import { getHealth, getAgentInfo, listAgentProfiles, addAgentProfile, removeAgentProfile, setActiveAgent, getSettings } from "../api/client";
+import { getHealth, getAgentInfo, listAgentProfiles, addAgentProfile, removeAgentProfile, setActiveAgent, getSettings, getAgentConfig, updateAgentConfig } from "../api/client";
 import { useI18n } from "../i18n";
+import { useTheme } from "../theme";
 import { useToast } from "../components/Toast";
 import { Skeleton } from "../components/Skeleton";
+import PathPicker from "../components/PathPicker";
 import type { HealthResponse, AgentInfoResponse } from "../types";
 
 interface AgentProfile {
@@ -11,8 +13,47 @@ interface AgentProfile {
   token: string;
 }
 
-export default function SettingsPage() {
-  const { t, locale, setLocale } = useI18n();
+type SettingsTab = "connection" | "appearance" | "storage" | "about";
+
+interface Props {
+  onDisconnect: () => void;
+  agentUrl: string;
+}
+
+export default function SettingsPage({ onDisconnect, agentUrl }: Props) {
+  const { t } = useI18n();
+  const [tab, setTab] = useState<SettingsTab>("connection");
+
+  return (
+    <div>
+      <div className="page-header">
+        <h2>{t("settings.title")}</h2>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
+        {(["connection", "appearance", "storage", "about"] as SettingsTab[]).map((tp) => (
+          <button
+            key={tp}
+            className={`btn-pill${tab === tp ? " btn-pill-active" : ""}`}
+            onClick={() => setTab(tp)}
+          >
+            {t(`settings.tab${tp.charAt(0).toUpperCase() + tp.slice(1)}` as string)}
+          </button>
+        ))}
+      </div>
+
+      {tab === "connection" && <ConnectionTab onDisconnect={onDisconnect} agentUrl={agentUrl} />}
+      {tab === "appearance" && <AppearanceTab />}
+      {tab === "storage" && <StorageTab />}
+      {tab === "about" && <AboutTab />}
+    </div>
+  );
+}
+
+/* --- Connection Tab --- */
+
+function ConnectionTab({ onDisconnect, agentUrl }: { onDisconnect: () => void; agentUrl: string }) {
+  const { t } = useI18n();
   const { pushToast } = useToast();
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [info, setInfo] = useState<AgentInfoResponse | null>(null);
@@ -80,8 +121,13 @@ export default function SettingsPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <h2>{t("settings.title")}</h2>
+      {/* Agent URL + Disconnect */}
+      <div className="glass-panel" style={{ marginBottom: 16 }}>
+        <div className="panel-header"><h3>{t("settings.agentUrl")}</h3></div>
+        <div className="panel-body" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <span style={{ fontFamily: "'SF Mono', monospace", fontSize: 13, color: "var(--text-secondary)" }}>{agentUrl}</span>
+          <button className="btn-danger btn-sm" onClick={onDisconnect}>{t("settings.disconnect")}</button>
+        </div>
       </div>
 
       <div className="card-grid-2col">
@@ -135,7 +181,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Agent Profiles */}
-      <div className="glass-panel" style={{ marginBottom: 16 }}>
+      <div className="glass-panel" style={{ marginTop: 16 }}>
         <div className="panel-header">
           <h3>{t("settings.agentProfiles")}</h3>
           <button className="btn-ghost btn-sm" onClick={() => setShowAddForm(!showAddForm)}>
@@ -176,9 +222,33 @@ export default function SettingsPage() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
 
-      {/* Language */}
+/* --- Appearance Tab --- */
+
+function AppearanceTab() {
+  const { t, locale, setLocale } = useI18n();
+  const { theme, toggle } = useTheme();
+
+  return (
+    <div>
       <div className="glass-panel" style={{ marginBottom: 16 }}>
+        <div className="panel-header"><h3>{t("settings.theme")}</h3></div>
+        <div className="panel-body">
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className={`btn-pill${theme === "light" ? " btn-pill-active" : ""}`} onClick={() => { if (theme !== "light") toggle(); }}>
+              {t("settings.light")}
+            </button>
+            <button className={`btn-pill${theme === "dark" ? " btn-pill-active" : ""}`} onClick={() => { if (theme !== "dark") toggle(); }}>
+              {t("settings.dark")}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="glass-panel">
         <div className="panel-header"><h3>{t("settings.language")}</h3></div>
         <div className="panel-body">
           <div style={{ display: "flex", gap: 8 }}>
@@ -197,8 +267,102 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
 
+/* --- Storage Tab --- */
+
+function StorageTab() {
+  const { t } = useI18n();
+  const { pushToast } = useToast();
+  const [storageDir, setStorageDir] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [showPathPicker, setShowPathPicker] = useState(false);
+
+  useEffect(() => {
+    getAgentConfig()
+      .then((cfg) => { setStorageDir(cfg.copy_storage_dir); })
+      .catch(() => {})
+      .finally(() => { setLoading(false); });
+  }, []);
+
+  async function handleSave() {
+    if (!storageDir.trim()) return;
+    setSaving(true);
+    try {
+      await updateAgentConfig({ copy_storage_dir: storageDir.trim() });
+      pushToast(t("settings.storageSaved"), "success");
+    } catch (e) {
+      pushToast(t("settings.storageSaveFailed") + `: ${e}`, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div>
+        <div className="glass-panel">
+          <div className="panel-header"><h3>{t("settings.storageTitle")}</h3></div>
+          <div className="panel-body"><Skeleton width="80%" height={38} /></div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
       <div className="glass-panel">
+        <div className="panel-header"><h3>{t("settings.storageTitle")}</h3></div>
+        <div className="panel-body">
+          <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", display: "flex", flexDirection: "column", gap: 6, textTransform: "uppercase", letterSpacing: "0.3px" }}>
+            {t("settings.copyStorageDir")}
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                className="glass-input"
+                style={{ flex: 1, fontFamily: "'SF Mono', monospace", fontSize: 13 }}
+                value={storageDir}
+                onChange={(e) => setStorageDir(e.target.value)}
+              />
+              <button className="btn-secondary btn-sm" onClick={() => setShowPathPicker(true)}>
+                {t("pathPicker.browse")}
+              </button>
+            </div>
+          </label>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 20 }}>
+            <button className="btn-primary" onClick={handleSave} disabled={saving || !storageDir.trim()}>
+              {saving ? t("common.loading") : t("settings.saveStorage")}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {showPathPicker && (
+        <PathPicker
+          onSelect={(path) => { setStorageDir(path); setShowPathPicker(false); }}
+          onClose={() => setShowPathPicker(false)}
+          initialPath={storageDir}
+        />
+      )}
+    </div>
+  );
+}
+
+/* --- About Tab --- */
+
+function AboutTab() {
+  const { t } = useI18n();
+  const [info, setInfo] = useState<AgentInfoResponse | null>(null);
+
+  useEffect(() => {
+    getAgentInfo().then(setInfo).catch(() => {});
+  }, []);
+
+  return (
+    <div>
+      <div className="glass-panel" style={{ marginBottom: 16 }}>
         <div className="panel-header"><h3>{t("settings.about")}</h3></div>
         <div className="panel-body">
           <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6, whiteSpace: "pre-line" }}>
@@ -206,6 +370,20 @@ export default function SettingsPage() {
           </p>
         </div>
       </div>
+
+      {info && (
+        <div className="glass-panel">
+          <div className="panel-header"><h3>{t("settings.agentInfo")}</h3></div>
+          <div className="panel-body">
+            <dl className="detail-list">
+              <dt>{t("settings.version")}</dt><dd>{info.version}</dd>
+              <dt>{t("settings.platform")}</dt><dd>{info.platform}</dd>
+              <dt>{t("settings.backends")}</dt><dd>{info.backends.join(", ") || t("common.none")}</dd>
+              <dt>{t("settings.capabilities")}</dt><dd>{info.capabilities.join(", ") || t("common.none")}</dd>
+            </dl>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

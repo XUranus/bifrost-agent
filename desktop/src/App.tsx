@@ -24,6 +24,7 @@ const JobsPage = lazy(() => import("./pages/Jobs"));
 const JobDetail = lazy(() => import("./pages/JobDetail"));
 const SLAPolicies = lazy(() => import("./pages/SLAPolicies"));
 const SettingsPage = lazy(() => import("./pages/Settings"));
+const NotificationsPage = lazy(() => import("./pages/Notifications"));
 const BackupReport = lazy(() => import("./pages/BackupReport"));
 
 function PageSuspense({ children }: { children: React.ReactNode }) {
@@ -156,7 +157,7 @@ function ConnectedApp({ agentUrl, onDisconnect }: { agentUrl: string; onDisconne
   useEffect(() => {
     isPermissionGranted().then((granted) => {
       if (!granted) requestPermission();
-    });
+    }).catch(() => {});
   }, []);
 
   const addNotification = useCallback((title: string, body: string, type: AppNotification["type"]) => {
@@ -171,12 +172,12 @@ function ConnectedApp({ agentUrl, onDisconnect }: { agentUrl: string; onDisconne
         const title = t("notif.jobCompleted");
         const body = t("notif.jobCompletedBody", { id: e.job_id.slice(0, 8) });
         addNotification(title, body, "success");
-        isPermissionGranted().then((ok) => ok && sendNotification({ title, body }));
+        isPermissionGranted().then((ok) => ok && sendNotification({ title, body })).catch(() => {});
       } else if (e.status === "failed") {
         const title = t("notif.jobFailed");
         const body = t("notif.jobFailedBody", { id: e.job_id.slice(0, 8), error: e.error_message ? `: ${e.error_message}` : "" });
         addNotification(title, body, "error");
-        isPermissionGranted().then((ok) => ok && sendNotification({ title, body }));
+        isPermissionGranted().then((ok) => ok && sendNotification({ title, body })).catch(() => {});
       }
     },
     onAssetHealth: (e) => {
@@ -206,13 +207,7 @@ function ConnectedApp({ agentUrl, onDisconnect }: { agentUrl: string; onDisconne
 
   return (
     <ToastProvider>
-      <Layout
-        agentUrl={agentUrl}
-        onDisconnect={onDisconnect}
-        notifications={notifications}
-        onMarkRead={handleMarkRead}
-        onClearNotifications={handleClearAll}
-      >
+      <Layout>
         <ErrorBoundary name="routes">
           <Routes>
             <Route path="/" element={<PageSuspense><Dashboard /></PageSuspense>} />
@@ -224,7 +219,8 @@ function ConnectedApp({ agentUrl, onDisconnect }: { agentUrl: string; onDisconne
             <Route path="/jobs/:id" element={<PageSuspense><JobDetail /></PageSuspense>} />
             <Route path="/jobs/:id/report" element={<PageSuspense><BackupReport /></PageSuspense>} />
             <Route path="/sla-policies" element={<PageSuspense><SLAPolicies /></PageSuspense>} />
-            <Route path="/settings" element={<PageSuspense><SettingsPage /></PageSuspense>} />
+            <Route path="/notifications" element={<PageSuspense><NotificationsPage notifications={notifications} onMarkRead={handleMarkRead} onClearAll={handleClearAll} /></PageSuspense>} />
+            <Route path="/settings" element={<PageSuspense><SettingsPage onDisconnect={onDisconnect} agentUrl={agentUrl} /></PageSuspense>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </ErrorBoundary>

@@ -36,7 +36,16 @@ pub async fn execute_job(
         }
     };
 
-    let sla = match db.with_conn(|conn| crate::db::slas::get_by_id(conn, &asset.sla_policy_id)) {
+    let sla_id = match &asset.sla_policy_id {
+        Some(id) => id.clone(),
+        None => {
+            progress.job_status(job_id, "failed", Some("Asset has no SLA policy bound"));
+            let _ = db.with_conn(|conn| crate::db::jobs::update_status(conn, job_id, "failed", 1));
+            return;
+        }
+    };
+
+    let sla = match db.with_conn(|conn| crate::db::slas::get_by_id(conn, &sla_id)) {
         Ok(Some(s)) => s,
         _ => {
             progress.job_status(job_id, "failed", Some("SLA policy not found"));
@@ -105,7 +114,7 @@ async fn execute_backup(
             backend,
             volume_id,
         } => {
-            execute_volume_backup(progress, job_id, asset, sla, backend, volume_id).await
+            execute_volume_backup(db, progress, job_id, asset, sla, backend, volume_id).await
         }
         crate::api::types::AssetConfig::NasShare {
             url,
@@ -126,12 +135,14 @@ async fn execute_fileset_backup(
     consistency_mode: bool,
     cancel: CancellationToken,
 ) -> Result<(), anyhow::Error> {
-    let target_dir = determine_target_dir(asset)?;
+    let target_dir = determine_target_dir(db, asset)?;
     let copy_mode = sla.copy_mode.clone();
     let backup_type = sla.backup_type.clone();
     let block_size = sla.block_size as usize;
     let subtask_count = sla.subtask_count as usize;
-    let temp_base = PathBuf::from("/var/lib/bifrost-agent/copy_repos");
+    let copy_storage_dir = db.with_conn(|conn| crate::db::agent_config::get(conn, "copy_storage_dir"))?
+        .unwrap_or_else(|| "/var/lib/bifrost-agent/copy_repos".to_string());
+    let temp_base = PathBuf::from(&copy_storage_dir);
 
     progress.job_log(job_id, "info", &format!(
         "Fileset backup: {} paths -> {} (consistency={consistency_mode})",
@@ -208,6 +219,7 @@ async fn execute_fileset_backup(
 }
 
 async fn execute_volume_backup(
+    db: &Arc<Database>,
     progress: &Arc<ProgressBus>,
     job_id: &str,
     asset: &crate::db::models::ProtectedAsset,
@@ -215,7 +227,7 @@ async fn execute_volume_backup(
     backend: &str,
     volume_id: &str,
 ) -> Result<(), anyhow::Error> {
-    let target_dir = determine_volume_target_dir(asset)?;
+    let target_dir = determine_volume_target_dir(&db, asset)?;
 
     progress.job_log(job_id, "info", &format!(
         "Volume backup: backend={backend}, volume={volume_id} -> {}",
@@ -256,7 +268,7 @@ async fn execute_nas_backup(
     url: &str,
     cancel: CancellationToken,
 ) -> Result<(), anyhow::Error> {
-    let target_dir = determine_target_dir(asset)?;
+    let target_dir = determine_target_dir(db, asset)?;
     let copy_mode = sla.copy_mode.clone();
     let backup_type = sla.backup_type.clone();
     let block_size = sla.block_size as usize;
@@ -283,7 +295,9 @@ async fn execute_nas_backup(
     }
 
     let target = bifrost::frame::location::DataLocation::local(target_dir.clone());
-    let temp_base = PathBuf::from("/var/lib/bifrost-agent/copy_repos");
+    let copy_storage_dir = db.with_conn(|conn| crate::db::agent_config::get(conn, "copy_storage_dir"))?
+        .unwrap_or_else(|| "/var/lib/bifrost-agent/copy_repos".to_string());
+    let temp_base = PathBuf::from(&copy_storage_dir);
 
     progress.job_log(job_id, "info", &format!(
         "NAS backup config: mode={copy_mode}, type={backup_type}, source_kind={}",
@@ -516,19 +530,23 @@ fn find_image_in_dir(dir: &Path) -> Result<PathBuf, anyhow::Error> {
 }
 
 fn determine_target_dir(
+    db: &Arc<Database>,
     asset: &crate::db::models::ProtectedAsset,
 ) -> Result<PathBuf, anyhow::Error> {
-    let base = PathBuf::from("/var/lib/bifrost-agent/copy_repos");
-    let dir = base.join(format!("asset_{}", asset.id));
+    let base = db.with_conn(|conn| crate::db::agent_config::get(conn, "copy_storage_dir"))?
+        .unwrap_or_else(|| "/var/lib/bifrost-agent/copy_repos".to_string());
+    let dir = PathBuf::from(base).join(format!("asset_{}", asset.id));
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
 
 fn determine_volume_target_dir(
+    db: &Arc<Database>,
     asset: &crate::db::models::ProtectedAsset,
 ) -> Result<PathBuf, anyhow::Error> {
-    let base = PathBuf::from("/var/lib/bifrost-agent/volume_backups");
-    let dir = base.join(format!("asset_{}", asset.id));
+    let base = db.with_conn(|conn| crate::db::agent_config::get(conn, "copy_storage_dir"))?
+        .unwrap_or_else(|| "/var/lib/bifrost-agent/copy_repos".to_string());
+    let dir = PathBuf::from(base).join(format!("asset_{}", asset.id));
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }

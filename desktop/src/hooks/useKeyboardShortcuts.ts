@@ -36,7 +36,7 @@ export function useKeyboardShortcuts() {
           break;
         case "5":
           e.preventDefault();
-          navigate("/settings");
+          navigate("/notifications");
           break;
       }
     }
