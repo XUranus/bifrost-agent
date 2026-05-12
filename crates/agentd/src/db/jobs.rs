@@ -98,6 +98,33 @@ pub fn update_status(conn: &Connection, id: &str, status: &str, error_count: i64
     Ok(())
 }
 
+pub fn update_started_at(conn: &Connection, id: &str) -> Result<(), anyhow::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE job_executions SET started_at = COALESCE(started_at, ?2), status = 'running' WHERE id = ?1",
+        rusqlite::params![id, now],
+    )?;
+    Ok(())
+}
+
+pub fn update_completion(
+    conn: &Connection,
+    id: &str,
+    status: &str,
+    size_bytes: Option<i64>,
+    file_count: Option<i64>,
+    error_count: i64,
+    copy_uuid: Option<&str>,
+) -> Result<(), anyhow::Error> {
+    let ended_at = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE job_executions SET status = ?2, size_bytes = ?3, file_count = ?4, error_count = ?5,
+         copy_uuid = COALESCE(?6, copy_uuid), ended_at = ?7 WHERE id = ?1",
+        rusqlite::params![id, status, size_bytes, file_count, error_count, copy_uuid, ended_at],
+    )?;
+    Ok(())
+}
+
 pub fn delete_by_id(conn: &Connection, id: &str) -> Result<bool, anyhow::Error> {
     let rows = conn.execute("DELETE FROM job_executions WHERE id = ?1", [id])?;
     Ok(rows > 0)

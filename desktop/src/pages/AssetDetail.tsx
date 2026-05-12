@@ -87,7 +87,8 @@ export default function AssetDetail() {
   useEffect(() => { load(); }, [id]);
 
   async function handleBackup() {
-    if (!id) return;
+    if (!id || !asset) return;
+    if (!confirm(t("assets.confirmBackup", { name: asset.name }))) return;
     try {
       await startJob(id, "backup");
       pushToast(t("assetDetail.backupStarted"), "success");

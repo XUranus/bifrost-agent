@@ -20,6 +20,8 @@ pub async fn execute_job(
     cancel: CancellationToken,
 ) {
     progress.job_status(job_id, "running", None);
+    let _ = db.with_conn(|conn| crate::db::jobs::update_started_at(conn, job_id));
+    let start_time = std::time::Instant::now();
 
     // Load asset + SLA from DB
     let asset = match db.with_conn(|conn| crate::db::assets::get_by_id(conn, asset_id)) {
@@ -69,10 +71,11 @@ pub async fn execute_job(
         }
         "restore" => {
             execute_restore(&db, &progress, job_id, &asset, &config, cancel).await
+                .map(|()| BackupResult::default())
         }
         "snapshot" => {
             progress.job_log(job_id, "warn", "Snapshot execution not yet implemented");
-            Ok(())
+            Ok(BackupResult::default())
         }
         _ => {
             progress.job_status(job_id, "failed", Some(&format!("Unknown operation: {operation}")));
@@ -81,15 +84,50 @@ pub async fn execute_job(
         }
     };
 
+    let elapsed = start_time.elapsed();
+    let elapsed_str = if elapsed.as_secs() >= 60 {
+        format!("{}m{:.1}s", elapsed.as_secs() / 60, (elapsed.as_secs() % 60) as f64 + elapsed.subsec_millis() as f64 / 1000.0)
+    } else {
+        format!("{:.1}s", elapsed.as_secs_f64())
+    };
+
     match result {
-        Ok(()) => {
+        Ok(r) => {
             progress.job_status(job_id, "completed", None);
-            let _ = db.with_conn(|conn| crate::db::jobs::update_status(conn, job_id, "completed", 0));
+            progress.job_log(job_id, "info", &format!(
+                "Job completed in {elapsed_str}: {} files, {} bytes, {} errors, copy={}",
+                r.total_files, r.total_bytes, r.errors, r.copy_uuid
+            ));
+            progress.job_progress(job_id, "done", 100.0, 0, 0, &format!(
+                "Completed: {} files, {} bytes (elapsed {elapsed_str})", r.total_files, r.total_bytes
+            ));
+            let _ = db.with_conn(|conn| crate::db::jobs::update_completion(
+                conn, job_id, "completed",
+                Some(r.total_bytes as i64),
+                Some(r.total_files as i64),
+                r.errors as i64,
+                Some(&r.copy_uuid),
+            ));
         }
         Err(e) => {
             progress.job_status(job_id, "failed", Some(&e.to_string()));
+            progress.job_log(job_id, "error", &format!("Job failed after {elapsed_str}: {e}"));
             let _ = db.with_conn(|conn| crate::db::jobs::update_status(conn, job_id, "failed", 1));
         }
+    }
+}
+
+/// Result returned from execute_backup.
+struct BackupResult {
+    copy_uuid: String,
+    total_files: u64,
+    total_bytes: u64,
+    errors: usize,
+}
+
+impl Default for BackupResult {
+    fn default() -> Self {
+        Self { copy_uuid: String::new(), total_files: 0, total_bytes: 0, errors: 0 }
     }
 }
 
@@ -101,7 +139,7 @@ async fn execute_backup(
     sla: &crate::db::models::SLAPolicy,
     config: &crate::api::types::AssetConfig,
     cancel: CancellationToken,
-) -> Result<(), anyhow::Error> {
+) -> Result<BackupResult, anyhow::Error> {
     match config {
         crate::api::types::AssetConfig::Fileset {
             paths,
@@ -134,7 +172,7 @@ async fn execute_fileset_backup(
     paths: &[PathBuf],
     consistency_mode: bool,
     cancel: CancellationToken,
-) -> Result<(), anyhow::Error> {
+) -> Result<BackupResult, anyhow::Error> {
     let target_dir = determine_target_dir(db, asset)?;
     let copy_mode = sla.copy_mode.clone();
     let backup_type = sla.backup_type.clone();
@@ -149,13 +187,14 @@ async fn execute_fileset_backup(
         paths.len(),
         target_dir.display()
     ));
+    progress.job_progress(job_id, "init", 0.0, 0, 0, "Initializing backup job");
 
     if cancel.is_cancelled() {
         return Err(anyhow::anyhow!("Job cancelled"));
     }
 
     if consistency_mode {
-        // Use consistency adapter: snapshot + mount + file scan
+        progress.job_progress(job_id, "scan", 10.0, 0, 0, "Starting consistency snapshot");
         let adapter = ConsistencyAdapter::new(progress.clone());
         let paths_clone = paths.to_vec();
         let target_clone = target_dir.clone();
@@ -179,13 +218,21 @@ async fn execute_fileset_backup(
         })
         .await??;
 
+        progress.job_progress(job_id, "finalize", 90.0, 0, 0, "Recording backup copy");
         record_backup_copy(db, asset, job_id, &backup_type, &result.copy_uuid, &result.copy_root, result.total_files, result.total_bytes).await?;
 
         progress.job_log(job_id, "info", &format!(
             "Consistency backup copy recorded: uuid={}", result.copy_uuid
         ));
+
+        Ok(BackupResult {
+            copy_uuid: result.copy_uuid,
+            total_files: result.total_files,
+            total_bytes: result.total_bytes,
+            errors: 0,
+        })
     } else {
-        // Standard file backup
+        progress.job_progress(job_id, "scan", 10.0, 0, 0, "Scanning source files");
         let adapter = FileBackupAdapter::new(db.clone(), progress.clone());
         let paths_clone = paths.to_vec();
         let target_clone = target_dir.clone();
@@ -193,7 +240,7 @@ async fn execute_fileset_backup(
         let asset_id_owned = asset.id.clone();
         let bt = backup_type.clone();
 
-        let result = tokio::task::spawn_blocking(move || {
+        let br = tokio::task::spawn_blocking(move || {
             adapter.run_backup(
                 &asset_id_owned,
                 &job_id_owned,
@@ -208,14 +255,20 @@ async fn execute_fileset_backup(
         })
         .await??;
 
-        record_backup_copy(db, asset, job_id, &backup_type, &result.copy_uuid, &result.copy_root, result.total_files, result.total_bytes).await?;
+        progress.job_progress(job_id, "finalize", 90.0, 0, 0, "Recording backup copy");
+        record_backup_copy(db, asset, job_id, &backup_type, &br.copy_uuid, &br.copy_root, br.total_files, br.total_bytes).await?;
 
         progress.job_log(job_id, "info", &format!(
-            "Backup copy recorded: uuid={}", result.copy_uuid
+            "Backup copy recorded: uuid={}", br.copy_uuid
         ));
-    }
 
-    Ok(())
+        Ok(BackupResult {
+            copy_uuid: br.copy_uuid,
+            total_files: br.total_files,
+            total_bytes: br.total_bytes,
+            errors: br.errors,
+        })
+    }
 }
 
 async fn execute_volume_backup(
@@ -226,13 +279,14 @@ async fn execute_volume_backup(
     _sla: &crate::db::models::SLAPolicy,
     backend: &str,
     volume_id: &str,
-) -> Result<(), anyhow::Error> {
+) -> Result<BackupResult, anyhow::Error> {
     let target_dir = determine_volume_target_dir(&db, asset)?;
 
     progress.job_log(job_id, "info", &format!(
         "Volume backup: backend={backend}, volume={volume_id} -> {}",
         target_dir.display()
     ));
+    progress.job_progress(job_id, "init", 0.0, 0, 0, "Initializing volume backup");
 
     let adapter = VolumeBackupAdapter::new(progress.clone());
     let backend_owned = backend.to_string();
@@ -240,6 +294,7 @@ async fn execute_volume_backup(
     let target_clone = target_dir.clone();
     let job_id_owned = job_id.to_string();
 
+    progress.job_progress(job_id, "scan", 10.0, 0, 0, "Creating volume snapshot");
     let result = tokio::task::spawn_blocking(move || {
         adapter.run_backup(
             &job_id_owned,
@@ -256,7 +311,12 @@ async fn execute_volume_backup(
         result.size_bytes, result.backend
     ));
 
-    Ok(())
+    Ok(BackupResult {
+        copy_uuid: String::new(),
+        total_files: 1,
+        total_bytes: result.size_bytes as u64,
+        errors: 0,
+    })
 }
 
 async fn execute_nas_backup(
@@ -267,14 +327,13 @@ async fn execute_nas_backup(
     sla: &crate::db::models::SLAPolicy,
     url: &str,
     cancel: CancellationToken,
-) -> Result<(), anyhow::Error> {
+) -> Result<BackupResult, anyhow::Error> {
     let target_dir = determine_target_dir(db, asset)?;
     let copy_mode = sla.copy_mode.clone();
     let backup_type = sla.backup_type.clone();
     let block_size = sla.block_size as usize;
     let subtask_count = sla.subtask_count as usize;
 
-    // Parse the NAS URL to determine the transport type
     let source = if url.starts_with("nfs://") {
         bifrost::frame::location::DataLocation::from_nfs_url(url)
             .map_err(|e| anyhow::anyhow!("Invalid NFS URL '{url}': {e}"))?
@@ -289,6 +348,7 @@ async fn execute_nas_backup(
         "NAS backup: {url} -> {}",
         target_dir.display()
     ));
+    progress.job_progress(job_id, "init", 0.0, 0, 0, "Initializing NAS backup");
 
     if cancel.is_cancelled() {
         return Err(anyhow::anyhow!("Job cancelled"));
@@ -303,6 +363,7 @@ async fn execute_nas_backup(
         "NAS backup config: mode={copy_mode}, type={backup_type}, source_kind={}",
         source.kind_name()
     ));
+    progress.job_progress(job_id, "scan", 10.0, 0, 0, "Connecting to NAS share");
 
     let job_id_owned = job_id.to_string();
     let asset_id_owned = asset.id.clone();
@@ -325,13 +386,19 @@ async fn execute_nas_backup(
     })
     .await??;
 
+    progress.job_progress(job_id, "finalize", 90.0, 0, 0, "Recording backup copy");
     record_backup_copy(db, asset, job_id, &backup_type, &result.copy_uuid, &result.copy_root, result.total_files, result.total_bytes).await?;
 
     progress.job_log(job_id, "info", &format!(
         "NAS backup copy recorded: uuid={}", result.copy_uuid
     ));
 
-    Ok(())
+    Ok(BackupResult {
+        copy_uuid: result.copy_uuid,
+        total_files: result.total_files,
+        total_bytes: result.total_bytes,
+        errors: result.errors,
+    })
 }
 
 /// Run a file backup with a potentially remote source (NAS).
@@ -355,6 +422,7 @@ fn run_nas_file_backup(
     use bifrost::frame::JobResult;
 
     progress.job_log(job_id, "info", "Starting NAS file backup...");
+    progress.job_progress(job_id, "scan", 20.0, 0, 0, "Scanning NAS share");
 
     let format_tag = match copy_mode {
         "aggregate" => "AGGR",
@@ -390,8 +458,12 @@ fn run_nas_file_backup(
         ..Default::default()
     };
 
+    progress.job_progress(job_id, "scan", 30.0, 0, 0, "Running NAS backup engine");
     let result: JobResult = FileBackupJob::new(cfg).run()
         .map_err(|e| anyhow::anyhow!("NAS backup job failed: {e}"))?;
+    progress.job_progress(job_id, "scan_done", 50.0, 0, 0, &format!(
+        "NAS backup completed: {} files, {} bytes", result.total_files, result.total_bytes
+    ));
 
     progress.job_log(job_id, "info", &format!(
         "NAS backup complete: {} files, {} bytes, copy_uuid={}",

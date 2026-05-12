@@ -16,12 +16,14 @@ pub mod retention_log;
 /// Central database handle, shared across all API handlers via axum State.
 pub struct Database {
     conn: Mutex<Connection>,
+    data_dir: std::path::PathBuf,
 }
 
 impl Database {
     /// Open (or create) the SQLite database and run migrations.
     pub fn open(config: &AgentConfig) -> Result<Self, anyhow::Error> {
         let path = config.db_path();
+        let data_dir = config.data_dir.clone();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -33,11 +35,17 @@ impl Database {
 
         let db = Self {
             conn: Mutex::new(conn),
+            data_dir,
         };
 
         db.run_migrations()?;
         db.seed_defaults()?;
         Ok(db)
+    }
+
+    /// The agent's data directory.
+    pub fn data_dir(&self) -> &std::path::Path {
+        &self.data_dir
     }
 
     /// Acquire the connection lock and run a closure.

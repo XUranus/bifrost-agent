@@ -1,3 +1,5 @@
+import { useI18n } from "../i18n";
+
 interface JobProgressData {
   phase: string;
   percent: number;
@@ -11,15 +13,34 @@ interface Props {
   compact?: boolean;
 }
 
+const PHASE_I18N_KEYS: Record<string, string> = {
+  init: "progress.init",
+  scan: "progress.scan",
+  scan_done: "progress.scan_done",
+  subtask_start: "progress.subtask_start",
+  subtask_done: "progress.subtask_done",
+  backup_progress: "progress.backup_progress",
+  finalize: "progress.finalize",
+  done: "progress.done",
+  restore_init: "progress.restore_init",
+  restore_scan: "progress.restore_scan",
+  restore_done: "progress.restore_done",
+};
+
 export default function JobProgress({ data, compact }: Props) {
+  const { t } = useI18n();
   const pct = Math.min(100, Math.max(0, data.percent));
   const eta = formatETA(data.eta_seconds);
   const throughput = formatThroughput(data.throughput_bytes_per_sec);
 
+  const phaseLabel = PHASE_I18N_KEYS[data.phase]
+    ? t(PHASE_I18N_KEYS[data.phase])
+    : data.phase;
+
   return (
     <div className={`job-progress${compact ? " job-progress-compact" : ""}`}>
       <div className="progress-header-row">
-        <span className="progress-phase">{data.phase}</span>
+        <span className="progress-phase">{phaseLabel}</span>
         <span className="progress-pct">{pct.toFixed(1)}%</span>
       </div>
       <div className="progress-track">
@@ -29,7 +50,11 @@ export default function JobProgress({ data, compact }: Props) {
         <div className="progress-meta">
           {throughput && <span>{throughput}</span>}
           {eta && <span>ETA: {eta}</span>}
-          {data.current_item && <span className="progress-item" title={data.current_item}>{data.current_item}</span>}
+          {data.current_item && (
+            <span className="progress-item" title={data.current_item}>
+              {data.current_item}
+            </span>
+          )}
         </div>
       )}
     </div>

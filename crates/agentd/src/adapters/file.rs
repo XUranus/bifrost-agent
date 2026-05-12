@@ -75,7 +75,6 @@ impl FileBackupAdapter {
         let failure_log_path = self.failure_log_path(job_id);
         let _failure_log = FailureLogConfig::new(&failure_log_path, FailureLogFormat::Json);
 
-        // Build temp config using agent's copy repos directory
         let temp_base = self.copy_repo_dir();
 
         let cfg = BackupJobConfig {
@@ -100,11 +99,35 @@ impl FileBackupAdapter {
             "Backup config: mode={copy_mode}, type={backup_type}, target={}",
             target_dir.display()
         ));
+        self.progress.job_log(job_id, "info", &format!(
+            "Scanning {} source path(s): {}",
+            source_paths.len(),
+            source_paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
+        ));
+        self.progress.job_progress(job_id, "scan", 15.0, 0, 0, &format!(
+            "Scanning {} source path(s)", source_paths.len()
+        ));
 
-        // Run the backup (blocking)
+        // Run the backup (blocking — bifrost engine does scan + subtasks + finalize)
+        self.progress.job_progress(job_id, "scan", 20.0, 0, 0, "Running backup engine");
+        self.progress.job_log(job_id, "info", "Backup engine started, scanning files...");
+
         let result: JobResult = FileBackupJob::new(cfg).run().map_err(|e| {
             anyhow::anyhow!("Backup job failed: {e}")
         })?;
+
+        self.progress.job_log(job_id, "info", &format!(
+            "Scan complete: {} files, {} directories, {} bytes",
+            result.total_files, result.total_dirs, result.total_bytes
+        ));
+        self.progress.job_log(job_id, "info", &format!(
+            "Subtasks: {} succeeded, {} failed",
+            result.subtasks_ok, result.subtasks_failed
+        ));
+        self.progress.job_progress(job_id, "scan_done", 50.0, 0, 0, &format!(
+            "Backup engine completed: {} files, {} bytes, {} dirs",
+            result.total_files, result.total_bytes, result.total_dirs
+        ));
 
         self.progress.job_log(job_id, "info", &format!(
             "Backup complete: {} files, {} bytes, copy_uuid={}",
@@ -136,6 +159,7 @@ impl FileBackupAdapter {
 
         self.progress.job_status(job_id, "running", None);
         self.progress.job_log(job_id, "info", "Starting file restore...");
+        self.progress.job_progress(job_id, "restore_init", 0.0, 0, 0, "Initializing restore job");
 
         let cfg = RestoreJobConfig {
             copy_source: DataLocation::local(source_dir.to_path_buf()),
@@ -144,10 +168,15 @@ impl FileBackupAdapter {
             ..Default::default()
         };
 
+        self.progress.job_progress(job_id, "restore_scan", 10.0, 0, 0, "Reading backup copy");
         let restore_job = FileRestoreJob::new(cfg);
         let result = restore_job.run().map_err(|e| {
             anyhow::anyhow!("Restore job failed: {e}")
         })?;
+
+        self.progress.job_progress(job_id, "restore_done", 100.0, 0, 0, &format!(
+            "Restore complete: {} files, {} bytes", result.total_files, result.total_bytes
+        ));
 
         self.progress.job_log(job_id, "info", &format!(
             "Restore complete: {} files, {} bytes",
@@ -179,6 +208,7 @@ impl FileBackupAdapter {
 
         self.progress.job_status(job_id, "running", None);
         self.progress.job_log(job_id, "info", "Starting file restore to remote target...");
+        self.progress.job_progress(job_id, "restore_init", 0.0, 0, 0, "Initializing remote restore");
 
         let cfg = RestoreJobConfig {
             copy_source: DataLocation::local(source_dir.to_path_buf()),
@@ -187,10 +217,15 @@ impl FileBackupAdapter {
             ..Default::default()
         };
 
+        self.progress.job_progress(job_id, "restore_scan", 10.0, 0, 0, "Reading backup copy");
         let restore_job = FileRestoreJob::new(cfg);
         let result = restore_job.run().map_err(|e| {
             anyhow::anyhow!("Restore job failed: {e}")
         })?;
+
+        self.progress.job_progress(job_id, "restore_done", 100.0, 0, 0, &format!(
+            "Restore complete: {} files, {} bytes", result.total_files, result.total_bytes
+        ));
 
         self.progress.job_log(job_id, "info", &format!(
             "Restore complete: {} files, {} bytes",
@@ -201,7 +236,7 @@ impl FileBackupAdapter {
     }
 
     fn failure_log_path(&self, job_id: &str) -> PathBuf {
-        PathBuf::from("/var/lib/bifrost-agent/logs/jobs")
+        self._db.data_dir().join("logs").join("jobs")
             .join(format!("{job_id}_failures.json"))
     }
 }

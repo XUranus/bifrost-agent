@@ -522,4 +522,39 @@ export const en: Record<string, string> = {
   "pathPicker.empty": "Empty directory",
   "pathPicker.select": "Select",
   "pathPicker.browse": "Browse",
+
+  // Progress phases
+  "progress.init": "Initializing backup job",
+  "progress.scan": "Scanning source files",
+  "progress.scan_done": "Scan complete: {files} files, {dirs} directories, {size}",
+  "progress.subtask_start": "Starting subtask {uuid}",
+  "progress.subtask_done": "Subtask {uuid} complete",
+  "progress.backup_progress": "Backup in progress: {files} files, {size}",
+  "progress.finalize": "Finalizing backup copy",
+  "progress.done": "Backup complete: {files} files, {size}",
+  "progress.restore_init": "Initializing restore job",
+  "progress.restore_scan": "Reading backup copy",
+  "progress.restore_done": "Restore complete: {files} files, {size}",
+  "progress.copyUuid": "Copied UUID to clipboard",
+  "progress.copyFailed": "Failed to copy",
+
+  // Job Detail extras
+  "jobDetail.clickToCopy": "Click to copy",
+  "jobDetail.copied": "Copied!",
+
+  // Milestone log entries (parsed from backend log messages)
+  "milestone.jobSubmitted": "Job submitted: {op}",
+  "milestone.filesetBackup": "Fileset backup: {paths} path(s) -> {target}",
+  "milestone.initializing": "Initializing {what}",
+  "milestone.starting": "Starting {what}",
+  "milestone.backupConfig": "Backup config: mode={mode}, type={type}",
+  "milestone.scanning": "Scanning {count} source path(s): {paths}",
+  "milestone.engineStarted": "Backup engine started, scanning files...",
+  "milestone.scanComplete": "Scan complete: {files} files, {dirs} directories, {size}",
+  "milestone.subtasks": "Subtasks: {ok} succeeded, {failed} failed",
+  "milestone.backupComplete": "Backup complete: {files} files, {size}",
+  "milestone.copyRecorded": "Backup copy recorded: {uuid}",
+  "milestone.jobCompleted": "Job completed in {elapsed}: {files} files, {size}, {errors} error(s)",
+  "milestone.jobFailed": "Job failed after {elapsed}",
+  "milestone.finalizing": "Finalizing backup copy",
 };

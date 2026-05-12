@@ -522,4 +522,39 @@ export const zh: Record<string, string> = {
   "pathPicker.empty": "空目录",
   "pathPicker.select": "选择",
   "pathPicker.browse": "浏览",
+
+  // Progress phases
+  "progress.init": "正在初始化备份任务",
+  "progress.scan": "正在扫描源文件",
+  "progress.scan_done": "扫描完成：{files} 个文件，{dirs} 个目录，{size}",
+  "progress.subtask_start": "正在执行子任务 {uuid}",
+  "progress.subtask_done": "子任务 {uuid} 完成",
+  "progress.backup_progress": "备份进行中：{files} 个文件，{size}",
+  "progress.finalize": "正在完成备份副本",
+  "progress.done": "备份完成：{files} 个文件，{size}",
+  "progress.restore_init": "正在初始化恢复任务",
+  "progress.restore_scan": "正在读取备份副本",
+  "progress.restore_done": "恢复完成：{files} 个文件，{size}",
+  "progress.copyUuid": "UUID 已复制到剪贴板",
+  "progress.copyFailed": "复制失败",
+
+  // Job Detail extras
+  "jobDetail.clickToCopy": "点击复制",
+  "jobDetail.copied": "已复制！",
+
+  // Milestone log entries (parsed from backend log messages)
+  "milestone.jobSubmitted": "任务已提交：{op}",
+  "milestone.filesetBackup": "文件集备份：{paths} 个路径 -> {target}",
+  "milestone.initializing": "正在初始化 {what}",
+  "milestone.starting": "正在启动 {what}",
+  "milestone.backupConfig": "备份配置：模式={mode}，类型={type}",
+  "milestone.scanning": "正在扫描 {count} 个源路径：{paths}",
+  "milestone.engineStarted": "备份引擎已启动，正在扫描文件...",
+  "milestone.scanComplete": "扫描完成：{files} 个文件，{dirs} 个目录，{size}",
+  "milestone.subtasks": "子任务：{ok} 个成功，{failed} 个失败",
+  "milestone.backupComplete": "备份完成：{files} 个文件，{size}",
+  "milestone.copyRecorded": "备份副本已记录：{uuid}",
+  "milestone.jobCompleted": "任务完成，耗时 {elapsed}：{files} 个文件，{size}，{errors} 个错误",
+  "milestone.jobFailed": "任务失败，耗时 {elapsed}",
+  "milestone.finalizing": "正在完成备份副本",
 };

@@ -50,32 +50,15 @@ pub async fn start_job(
         ));
     }
 
-    let job_id = uuid::Uuid::new_v4().to_string();
-    let now = chrono::Utc::now().to_rfc3339();
+    let asset_uuid = uuid::Uuid::parse_str(&req.asset_id)
+        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, format!("Invalid asset ID: {e}")))?;
 
-    let job = JobExecution {
-        id: job_id.clone(),
-        asset_id: req.asset_id.clone(),
-        sla_policy_id: None,
-        operation: req.operation.as_str().to_string(),
-        status: "running".to_string(),
-        copy_uuid: None,
-        backup_copy_id: None,
-        size_bytes: None,
-        file_count: None,
-        error_count: 0,
-        started_at: Some(now.clone()),
-        ended_at: None,
-        log_path: None,
-        failure_log_path: None,
-    };
-
-    state.db.with_conn(|conn| db::jobs::insert(conn, &job))
+    let job_id = state.queue.submit(asset_uuid, req.operation.as_str()).await
         .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    state.progress.job_status(&job_id, "running", None);
-
-    // TODO: Submit to job queue for actual execution (Week 5-6)
+    let job = state.db.with_conn(|conn| db::jobs::get_by_id(conn, &job_id.to_string()))
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Job not found after creation".into()))?;
 
     Ok(Json(job_to_response(&job)))
 }

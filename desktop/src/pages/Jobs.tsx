@@ -159,7 +159,12 @@ export default function JobsPage() {
                       {getStatusLabel(j.status)}
                     </span>
                   </div>
-                  <span className="td-mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+                  <span
+                    className="td-mono"
+                    style={{ fontSize: 11, color: "var(--text-tertiary)", cursor: "pointer" }}
+                    title={t("jobDetail.clickToCopy")}
+                    onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(j.id); pushToast(t("jobDetail.copied"), "success"); }}
+                  >
                     {j.id.slice(0, 8)}
                   </span>
                 </div>

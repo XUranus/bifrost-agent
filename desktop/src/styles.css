@@ -654,6 +654,23 @@ select.glass-input option {
   font-weight: 500;
 }
 
+.copyable-id {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0;
+  transition: opacity 0.15s;
+}
+.copyable-id:hover {
+  opacity: 0.8;
+}
+.copyable-id .id-segment {
+  transition: color 0.15s;
+}
+.copyable-id:hover .id-segment {
+  color: var(--accent);
+}
+
 .glass-table .td-link:hover {
   text-decoration: underline;
 }
